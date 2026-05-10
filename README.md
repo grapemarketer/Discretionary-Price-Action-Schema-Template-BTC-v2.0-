@@ -1,28 +1,27 @@
-# Price-Action-Labeling-Schema-v2.0-
-JSON schema template for discretionary price-action traders who want to convert market-structure reads and judgements into machine-readable datasets for signal research, ML modeling, and systematic trading development.
-
 # Price Action Session Labeling Schema
 
-This repository contains a two-script workflow for building and completing OHLC-only price-action labeling files.
+This repository contains a two-stage workflow for producing OHLC-only price-action labeling files and then completing them with objective post-event outcome measurements.
 
-The main script creates a 24-hour manual labeling template from Binance 15-minute candles. The helper script is run after manual labeling to autopopulate raw price outcome measurements.
+The generator creates a fixed 24-hour manual labeling template from Binance 15-minute futures candles. The helper script is run after manual labeling to fill raw price outcome measurements for each labeled event.
 
 ## Files
 
 | File | Purpose |
 |---|---|
-| `v2.0_jsonschema.py` | Generates the main 24-hour price-action labeling JSON template. |
+| `v2.1_jsonschema.py` | Current generator for the 24-hour price-action labeling JSON template. |
+| `v2.0_jsonschema.py` | Older generator retained in the workspace. Prefer `v2.1_jsonschema.py` for new files. |
 | `populate_raw_price_outcomes.py` | Reads a manually labeled JSON file and fills `event_outcome_labels.raw_price_outcome`. |
+| `ctx_BTCUSDT_*.json` | Generated labeling templates or completed labeling files. |
 
 ## Requirements
 
-Install the required Python packages:
+Install the generator dependencies:
 
 ```bash
 pip install requests pandas plotly
 ```
 
-The main script uses:
+The generator uses:
 
 - `requests` for Binance API requests
 - `pandas` for candle data handling
@@ -34,25 +33,25 @@ The helper script uses only the Python standard library.
 
 The workflow has two stages:
 
-1. Generate the 24-hour manual labeling file with `v2.0_jsonschema.py`.
+1. Generate the 24-hour manual labeling file with `v2.1_jsonschema.py`.
 2. After manually labeling events, run `populate_raw_price_outcomes.py` to produce a completed JSON file with measured outcomes.
 
 The main labeling session always remains 24 hours, from 5PM to 5PM in either EST or EDT.
 
-The helper script may fetch additional candles after the session ends, but only for outcome measurement. These extra candles are not part of the manual labeling session.
+The helper may fetch additional candles after the session ends, but only for outcome measurement. These extra candles are not part of the manual labeling session and are not appended to `candles`.
 
 ## Stage 1: Generate The Manual Labeling Template
 
-Run the main script with a session date and timezone:
+Run the generator with a session date and timezone:
 
 ```bash
-python v2.0_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json
+python v2.1_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json
 ```
 
 To skip the interactive chart:
 
 ```bash
-python v2.0_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
+python v2.1_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
 ```
 
 If `--output` is omitted, the script creates a timestamped file:
@@ -61,21 +60,19 @@ If `--output` is omitted, the script creates a timestamped file:
 ctx_BTCUSDT_YYYYMMDD_HHMMSS.json
 ```
 
-### Accepted Date Formats
-
-Examples:
+Accepted date examples:
 
 ```bash
-python v2.0_jsonschema.py "1/20/26 (EST)"
-python v2.0_jsonschema.py "1/20/26 EDT"
-python v2.0_jsonschema.py "1/20/2026 EST"
+python v2.1_jsonschema.py "1/20/26 (EST)"
+python v2.1_jsonschema.py "1/20/26 EDT"
+python v2.1_jsonschema.py "1/20/2026 EST"
 ```
 
 Only `EST` and `EDT` are supported.
 
-## What The Main Script Produces
+## What The Generator Produces
 
-The main script fetches Binance futures 15-minute OHLC candles for a fixed 24-hour session:
+The generator fetches Binance futures 15-minute OHLC candles for a fixed 24-hour session:
 
 ```text
 5PM local session start -> 5PM next-day local session end
@@ -90,10 +87,13 @@ The output JSON includes:
 - `auto_price_action_sequences`
 - `last_24h_percent_range`
 - `price_action_levels`
-- `support_resistance_negative_examples`
+- `macro_support_resistance_negative_examples`
 - `micro_support_resistance_negative_examples`
-- `support_resistance_borderline_examples`
+- `macro_support_resistance_borderline_examples`
+- `micro_support_resistance_borderline_examples`
 - `auction_ranges`
+- `auction_ranges_negative_examples`
+- `micro_level_regime_context`
 - `micro_trends`
 - `micro_candlestick_patterns`
 - `confluence`
@@ -105,60 +105,90 @@ The `candles` section is the manual labeling window. It should remain the 24-hou
 
 ### Price Action Levels
 
-The schema supports:
+The current schema uses explicit macro and micro level roles:
 
-- support
-- resistance
-- micro support
-- micro resistance
+- `macro_support`
+- `macro_resistance`
+- `micro_support`
+- `micro_resistance`
 
-Each level includes:
+These are stored under:
 
 ```json
-{
-  "id": "support_1",
-  "price": null,
-  "candle_idx_range": {
-    "start_idx": null,
-    "end_idx": null
-  },
-  "holds_at_session_end": false,
-  "level_role": "support",
-  "label_confidence": null,
-  "confidence_reason_codes": [],
-  "weakness_reason_codes": []
+"price_action_levels": {
+  "macro_support": [],
+  "macro_resistance": [],
+  "micro_support": [],
+  "micro_resistance": []
 }
 ```
 
-Support and resistance also include conversion fields for later auction-bound conversion.
+Macro levels represent durable session structures. Micro levels represent immediate local structures and include a short `context_window` with an `expires_after_bars` placeholder.
+
+Each level includes formation, candle range, reaction indexes, confidence fields, weakness fields, and a `holds_at_session_end` flag. Macro support/resistance levels also include conversion fields for later auction-bound conversion.
 
 ### Negative And Borderline Examples
 
 The schema includes explicit sections for examples that should not be treated as clean levels:
 
-- `support_resistance_negative_examples`
+- `macro_support_resistance_negative_examples`
 - `micro_support_resistance_negative_examples`
-- `support_resistance_borderline_examples`
+- `macro_support_resistance_borderline_examples`
+- `micro_support_resistance_borderline_examples`
 
-These sections are useful for capturing rejected or ambiguous level candidates, not only clean support and resistance.
+Use these sections to capture rejected, duplicate, weak, or ambiguous candidates instead of leaving them undocumented. This helps ML ingestion learn what not to classify as a valid level.
 
 ### Auction Ranges
 
-The schema supports:
+Auction ranges are split into:
 
-- macro auction ranges
-- micro auction ranges
+```json
+"auction_ranges": {
+  "macro": [],
+  "micro": []
+}
+```
 
-Macro ranges can contain multiple candle windows. Micro ranges use one candle range.
+Macro and micro auctions are validated by macro support/resistance bounds:
+
+- lower bound should reference a `macro_support`
+- upper bound should reference a `macro_resistance`
+- `macro_support_resistance_distance_pct` records the distance between bounds
+- distances greater than `0.5%` classify as macro auctions
+- distances equal to or below `0.5%` classify as micro auctions
+
+Rejected auction candidates belong in:
+
+```json
+"auction_ranges_negative_examples": {
+  "macro": [],
+  "micro": []
+}
+```
+
+### Micro Level Regime Context
+
+`micro_level_regime_context` summarizes local pressure from repeated micro support and micro resistance behavior.
+
+It tracks:
+
+- micro supports formed, held, and breached
+- micro resistances formed, held, and breached
+- dominant pressure
+- regime read
+- referenced micro support and resistance IDs
+
+This section is useful for modeling whether local structure was showing buyside momentum, sellside momentum, or two-way chop before an event.
 
 ### Micro Trends
 
-Micro trends include fields for:
+Micro trends include:
 
 - trend direction
 - candle range
-- acceleration
-- trend break
+- confirmation candle
+- acceleration range
+- trend break candle
 - reclaim after break
 - break confirmation
 
@@ -172,6 +202,7 @@ Example:
     "start_idx": null,
     "end_idx": null
   },
+  "confirmation_candle_idx": null,
   "accelerated": false,
   "acceleration_candle_idx_range": {
     "start_idx": null,
@@ -186,7 +217,7 @@ Example:
 
 ### Candlestick Patterns
 
-The schema includes manual candlestick pattern slots and also auto-detects micro range engulfings from OHLC:
+The schema includes manual candlestick pattern slots and auto-detects micro range engulfings from OHLC:
 
 - `bullish_micro_range_engulfing`
 - `bearish_micro_range_engulfing`
@@ -197,9 +228,17 @@ Auto-detected patterns are marked with:
 "auto_detected": true
 ```
 
+Manual pattern entries can also include `candles_involved` when the relevant candles are non-contiguous.
+
+### Confluence
+
+`confluence` links a pattern, primary macro structure, optional confirming micro break, and directional support.
+
+Use this section when a candlestick pattern, level reaction, trend change, or micro-level break strengthens the read of a structural event.
+
 ### Event Outcome Labels
 
-`event_outcome_labels` is the main bridge between manual labeling and automated raw outcome measurement.
+`event_outcome_labels` is the bridge between manual structure labeling and automated raw outcome measurement.
 
 Each event can define:
 
@@ -208,6 +247,7 @@ Each event can define:
 - expected direction
 - referenced structure
 - optional context references
+- last relevant micro level
 - human interpretation
 - raw price outcome placeholders
 
@@ -216,13 +256,13 @@ Example:
 ```json
 {
   "id": "event_1",
-  "event_type": "support_level_bounce",
+  "event_type": "macro_support_level_retest",
   "event_candle_idx": 42,
   "expected_direction": "long",
   "referenced_structure": {
-    "structure_type": "support",
-    "structure_id": "support_1",
-    "structure_role": "support",
+    "structure_type": "macro_support",
+    "structure_id": "macro_support_1",
+    "structure_role": "macro_support",
     "structure_price": 62500.0
   },
   "context_refs": {
@@ -230,8 +270,17 @@ Example:
     "auction_id": null,
     "confluence_ids": []
   },
+  "last_micro_level": {
+    "level_id": null,
+    "level_role": null,
+    "level_price": null,
+    "level_validation_idx": null,
+    "distance_to_referenced_structure_pct": null,
+    "has_significance": false,
+    "significance_reason_codes": []
+  },
   "human_interpretation": {
-    "read": "support_hold_with_bounce_potential",
+    "read": "macro_support_hold_with_bounce_potential",
     "confidence": "medium",
     "reason_codes": [],
     "counterevidence_codes": []
@@ -271,7 +320,12 @@ python populate_raw_price_outcomes.py ctx_BTCUSDT_20260506.json --output ctx_BTC
 
 The helper script populates standard raw outcome windows:
 
+- 1 candle
+- 2 candles
+- 4 candles
+- 6 candles
 - 8 candles
+- 10 candles
 - 16 candles
 - 24 candles
 - 48 candles
@@ -281,7 +335,12 @@ These are stored under:
 ```json
 "raw_price_outcome": {
   "standard_windows": {
+    "1": {},
+    "2": {},
+    "4": {},
+    "6": {},
     "8": {},
+    "10": {},
     "16": {},
     "24": {},
     "48": {}
@@ -318,11 +377,13 @@ For short events:
 
 If `referenced_structure.structure_price` is provided, the helper also checks whether the structure was reclaimed or invalidated during the lookahead window.
 
+Only events with an integer `event_candle_idx` and `expected_direction` of `long` or `short` are measured. Neutral or incomplete events remain unmeasured.
+
 ## Extra Lookahead Candles
 
-The main script only includes the 24-hour manual labeling session in `candles`.
+The generator only includes the 24-hour manual labeling session in `candles`.
 
-If a labeled event is close to the end of the session, the 48-candle outcome window may extend beyond the available session candles. In that case, the helper script fetches up to 12 additional hours of Binance 15-minute candles.
+If a labeled event is close to the end of the session, the 48-candle outcome window may extend beyond the available session candles. In that case, the helper fetches up to 12 additional hours of Binance 15-minute candles.
 
 The first extra candle starts exactly at:
 
@@ -338,15 +399,15 @@ Extra candles are not appended to `candles`. They are written separately at the 
 "raw_price_outcome_lookahead_candles": []
 ```
 
-This section is included for auditability and accuracy. It shows the continuation candles used by the helper script for raw outcome measurement.
+This section is included for auditability and accuracy. It shows the continuation candles used by the helper for raw outcome measurement.
 
 ## Completed Output Metadata
 
-The helper script also writes:
+The helper also writes:
 
 ```json
 "raw_price_outcome_population": {
-  "standard_windows_bars": [8, 16, 24, 48],
+  "standard_windows_bars": [1, 2, 4, 6, 8, 10, 16, 24, 48],
   "manual_labeling_candles_unchanged": true,
   "extra_lookahead_candles_fetched": 0,
   "extra_lookahead_data_usage": "..."
@@ -357,24 +418,32 @@ This records how the outcome fields were populated and confirms that the origina
 
 ## Important Boundaries
 
-The main script is for manual labeling.
+The generator is for manual labeling.
 
 The helper script is for objective outcome measurement after manual labeling.
 
 The 24-hour `candles` array should be treated as the manual labeling session. Extra lookahead candles are only for measuring future outcomes and should not be used as part of the manual labeling window.
+
+Raw outcome fields should be regenerated by `populate_raw_price_outcomes.py` after event labels change.
 
 ## Example Full Workflow
 
 Generate the manual labeling template:
 
 ```bash
-python v2.0_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
+python v2.1_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
 ```
 
 Manually fill relevant fields in:
 
 - `price_action_levels`
+- `macro_support_resistance_negative_examples`
+- `micro_support_resistance_negative_examples`
+- `macro_support_resistance_borderline_examples`
+- `micro_support_resistance_borderline_examples`
 - `auction_ranges`
+- `auction_ranges_negative_examples`
+- `micro_level_regime_context`
 - `micro_trends`
 - `micro_candlestick_patterns`
 - `confluence`
@@ -400,5 +469,4 @@ The completed file will contain:
 - Extra lookahead candles are helper-only and outcome-only.
 - Raw outcomes are autopopulated, not manually labeled.
 - The expected direction for event measurement must be `long` or `short`.
-- Events with missing or invalid `event_candle_idx` or `expected_direction` will remain unmeasured.
-
+- Events with missing or invalid `event_candle_idx` or `expected_direction` remain unmeasured.
