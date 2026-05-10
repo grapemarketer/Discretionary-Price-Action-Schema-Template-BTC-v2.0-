@@ -17,7 +17,7 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 
 
-RAW_PRICE_OUTCOME_WINDOWS = (8, 16, 24, 48)
+RAW_PRICE_OUTCOME_WINDOWS = (1, 2, 4, 6, 8, 10, 16, 24, 48)
 PCT_DECIMALS = 4
 BINANCE_URL = "https://fapi.binance.com/fapi/v1/klines"
 TIMEFRAME = "15m"
