@@ -38,9 +38,9 @@ DEFAULT_SYMBOL = "BTCUSDT"
 SESSION_START_HOUR = 17
 SESSION_END_HOUR = 17
 SCHEMA_NAME = "PriceActionOnlySession15m"
-SCHEMA_VERSION = 19
+SCHEMA_VERSION = 20
 SCHEMA_RELEASE = "v2.1"
-RAW_PRICE_OUTCOME_WINDOWS = (8, 16, 24, 48)
+RAW_PRICE_OUTCOME_WINDOWS = (1, 2, 4, 6, 8, 10, 16, 24, 48)
 
 TZ_OFFSETS: dict[str, int] = {"EST": -5, "EDT": -4}
 
@@ -1114,7 +1114,7 @@ def _field_definitions() -> dict:
         "event_outcome_labels.last_micro_level.distance_to_referenced_structure_pct": "Percent distance between the last micro level price and the referenced macro support, macro resistance, or auction-bound price.",
         "event_outcome_labels.last_micro_level.significance_reason_codes": "Controlled reasons explaining why the last micro level is or is not significant to the event outcome.",
         "event_outcome_labels.human_interpretation": "Manual interpretation of the event, including controlled read, confidence, supporting reasons, and counterevidence.",
-        "event_outcome_labels.raw_price_outcome": "Autopopulated by populate_raw_price_outcomes.py after manual event labeling. Contains raw lookahead outcome measurements across standard 8, 16, 24, and 48 candle windows in the completed JSON copy.",
+        "event_outcome_labels.raw_price_outcome": "Autopopulated by populate_raw_price_outcomes.py after manual event labeling. Contains raw lookahead outcome measurements across standard 1, 2, 4, 6, 8, 10, 16, 24, and 48 candle windows in the completed JSON copy.",
         "confluence": "Manual combined events where a pattern, trend change, or sequential micro-level break aligns with a level or auction structure.",
         "confluence.primary_structure": "Primary macro support or macro resistance structure involved in the confluence, including the reaction candle that came before the confirming signal.",
         "confluence.confirming_micro_break": "Optional sequential confluence where price rejects from macro resistance then breaches nearby micro support, or bounces from macro support then breaches nearby micro resistance.",
