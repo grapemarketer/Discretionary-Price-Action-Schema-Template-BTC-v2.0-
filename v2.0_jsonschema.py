@@ -38,9 +38,8 @@ DEFAULT_SYMBOL = "BTCUSDT"
 SESSION_START_HOUR = 17
 SESSION_END_HOUR = 17
 SCHEMA_NAME = "PriceActionOnlySession15m"
-SCHEMA_VERSION = 18
-SCHEMA_CREATED_AT = "2026-04-27"
-SCHEMA_RELEASE = "price_action_only_v1"
+SCHEMA_VERSION = 19
+SCHEMA_RELEASE = "v2.1"
 RAW_PRICE_OUTCOME_WINDOWS = (8, 16, 24, 48)
 
 TZ_OFFSETS: dict[str, int] = {"EST": -5, "EDT": -4}
@@ -138,11 +137,49 @@ def _empty_candle_range() -> dict:
     return {"start_idx": None, "confirmation_candle_idx": None, "end_idx": None}
 
 
+def _empty_auction_bound_validation(bound_role: str) -> dict:
+    return {
+        "bound_role": bound_role,
+        "level_id": None,
+        "level_role": None,
+        "level_price": None,
+        "level_validation_idx": None,
+        "auction_confirmation_idx": None,
+    }
+
+
+def _empty_auction_validation() -> dict:
+    return {
+        "validation_rule": None,
+        "validation_idx": None,
+        "macro_support_resistance_distance_pct": None,
+        "distance_classification_rule": None,
+        "lower_bound": _empty_auction_bound_validation("lower_bound"),
+        "upper_bound": _empty_auction_bound_validation("upper_bound"),
+        "additional_confirming_level_ids": [],
+    }
+
+
+def _empty_level_candle_range() -> dict:
+    return {"start_idx": None, "validation_idx": None, "end_idx": None}
+
+
+def _empty_level_formation() -> dict:
+    return {
+        "first_reaction_idx": None,
+        "second_reaction_idx": None,
+        "validation_reaction_idx": None,
+        "validation_rule": None,
+    }
+
+
 def _base_level(level_id: str, role: str | None = None) -> dict:
     level = {
         "id": level_id,
         "price": None,
-        "candle_idx_range": {"start_idx": None, "end_idx": None},
+        "formation": _empty_level_formation(),
+        "candle_idx_range": _empty_level_candle_range(),
+        "reaction_candle_indices": [],
         "holds_at_session_end": False,
     }
     if role is not None:
@@ -151,12 +188,13 @@ def _base_level(level_id: str, role: str | None = None) -> dict:
 
 
 def _empty_support_level(level_id: str) -> dict:
-    level = _base_level(level_id, "support")
+    level = _base_level(level_id, "macro_support")
     level.update(
         {
             "label_confidence": None,
             "confidence_reason_codes": [],
             "weakness_reason_codes": [],
+            "confluence_ids": [],
             "level_converted_to_macro_auction_lower_bound": _empty_conversion(),
             "level_converted_to_micro_auction_lower_bound": _empty_conversion(),
         }
@@ -165,12 +203,13 @@ def _empty_support_level(level_id: str) -> dict:
 
 
 def _empty_resistance_level(level_id: str) -> dict:
-    level = _base_level(level_id, "resistance")
+    level = _base_level(level_id, "macro_resistance")
     level.update(
         {
             "label_confidence": None,
             "confidence_reason_codes": [],
             "weakness_reason_codes": [],
+            "confluence_ids": [],
             "level_converted_to_macro_auction_upper_bound": _empty_conversion(),
             "level_converted_to_micro_auction_upper_bound": _empty_conversion(),
         }
@@ -183,6 +222,13 @@ def _empty_micro_level(level_id: str) -> dict:
     level = _base_level(level_id, role)
     level.update(
         {
+            "context_window": {
+                "start_idx": None,
+                "validation_idx": None,
+                "end_idx": None,
+                "window_type": "immediate_price_action",
+                "expires_after_bars": 3,
+            },
             "label_confidence": None,
             "confidence_reason_codes": [],
             "weakness_reason_codes": [],
@@ -192,21 +238,49 @@ def _empty_micro_level(level_id: str) -> dict:
 
 
 def _empty_level(level_id: str, role: str) -> dict:
-    if role == "support":
+    if role == "macro_support":
         return _empty_support_level(level_id)
-    if role == "resistance":
+    if role == "macro_resistance":
         return _empty_resistance_level(level_id)
     return _empty_micro_level(level_id)
 
 
-def _empty_support_resistance_negative_example(example_id: str) -> dict:
+def _empty_macro_support_resistance_negative_example(example_id: str) -> dict:
     return {
         "id": example_id,
         "candidate_role": None,
         "candidate_price": None,
-        "candle_idx_range": {"start_idx": None, "end_idx": None},
-        "rejected_as_valid_level": True,
+        "candidate_formation": {
+            "origin_idx": None,
+            "candidate_detected_idx": None,
+            "required_reactions_for_validation": 3,
+            "actual_significant_reactions": None,
+            "validation_status": "rejected",
+        },
+        "reaction_sequence": [
+            {
+                "reaction_number": None,
+                "candle_idx": None,
+                "reaction_type": None,
+                "reaction_quality": None,
+                "price_respected": None,
+            }
+        ],
+        "duplicate_of_existing_level": {
+            "is_duplicate": False,
+            "existing_level_id": None,
+            "existing_level_role": None,
+            "shared_reaction_candle_indices": [],
+            "distance_from_existing_level_pct": None,
+            "explanation_codes": [],
+        },
+        "failed_validation_tests": [],
         "rejection_reason_codes": [],
+        "invalidated_by_price": {
+            "invalidated": False,
+            "invalidation_idx": None,
+            "invalidation_type": None,
+        },
     }
 
 
@@ -218,6 +292,52 @@ def _empty_micro_support_resistance_negative_example(example_id: str) -> dict:
         "candle_idx_range": {"start_idx": None, "end_idx": None},
         "rejected_as_valid_micro_level": True,
         "rejection_reason_codes": [],
+    }
+
+
+def _empty_macro_auction_range_negative_example(example_id: str) -> dict:
+    return {
+        "id": example_id,
+        "candidate_type": "macro",
+        "low": None,
+        "high": None,
+        "candles_within": [_empty_candle_range()],
+        "rejected_as_valid_auction_range": True,
+        "failed_validation_tests": [],
+        "rejection_reason_codes": [],
+    }
+
+
+def _empty_micro_auction_range_negative_example(example_id: str) -> dict:
+    return {
+        "id": example_id,
+        "candidate_type": "micro",
+        "low": None,
+        "high": None,
+        "candle_idx_range": _empty_candle_range(),
+        "rejected_as_valid_auction_range": True,
+        "failed_validation_tests": [],
+        "rejection_reason_codes": [],
+    }
+
+
+def _empty_macro_auction_range(auction_id: str) -> dict:
+    return {
+        "id": auction_id,
+        "low": None,
+        "high": None,
+        "candles_within": [_empty_candle_range()],
+        "validated_by_levels": _empty_auction_validation(),
+    }
+
+
+def _empty_micro_auction_range(auction_id: str) -> dict:
+    return {
+        "id": auction_id,
+        "low": None,
+        "high": None,
+        "candle_idx_range": _empty_candle_range(),
+        "validated_by_levels": _empty_auction_validation(),
     }
 
 
@@ -245,14 +365,55 @@ def _empty_raw_price_outcome() -> dict:
     }
 
 
-def _empty_support_resistance_borderline_example(example_id: str) -> dict:
+def _empty_macro_support_resistance_borderline_example(example_id: str) -> dict:
     return {
         "id": example_id,
         "candidate_role": None,
         "candidate_price": None,
-        "candle_idx_range": {"start_idx": None, "end_idx": None},
-        "borderline_as_valid_level": True,
-        "label_confidence": "borderline",
+        "candidate_formation": {
+            "origin_idx": None,
+            "candidate_detected_idx": None,
+            "required_reactions_for_validation": 3,
+            "actual_significant_reactions": None,
+            "validation_status": "borderline",
+            "borderline_reason": None,
+        },
+        "reaction_sequence": [
+            {
+                "reaction_number": None,
+                "candle_idx": None,
+                "reaction_type": None,
+                "reaction_quality": None,
+                "price_respected": None,
+            }
+        ],
+        "supporting_reason_codes": [],
+        "weakness_reason_codes": [],
+    }
+
+
+def _empty_micro_support_resistance_borderline_example(example_id: str) -> dict:
+    return {
+        "id": example_id,
+        "candidate_role": None,
+        "candidate_price": None,
+        "candidate_formation": {
+            "origin_idx": None,
+            "candidate_detected_idx": None,
+            "required_reactions_for_validation": 3,
+            "actual_significant_reactions": None,
+            "validation_status": "borderline",
+            "borderline_reason": None,
+        },
+        "reaction_sequence": [
+            {
+                "reaction_number": None,
+                "candle_idx": None,
+                "reaction_type": None,
+                "reaction_quality": None,
+                "price_respected": None,
+            }
+        ],
         "supporting_reason_codes": [],
         "weakness_reason_codes": [],
     }
@@ -275,6 +436,15 @@ def _empty_event_outcome_label(event_id: str) -> dict:
             "auction_id": None,
             "confluence_ids": [],
         },
+        "last_micro_level": {
+            "level_id": None,
+            "level_role": None,
+            "level_price": None,
+            "level_validation_idx": None,
+            "distance_to_referenced_structure_pct": None,
+            "has_significance": False,
+            "significance_reason_codes": [],
+        },
         "human_interpretation": {
             "read": None,
             "confidence": None,
@@ -285,11 +455,53 @@ def _empty_event_outcome_label(event_id: str) -> dict:
     }
 
 
+def _empty_confluence(confluence_id: str) -> dict:
+    return {
+        "id": confluence_id,
+        "pattern_id": None,
+        "level_id": None,
+        "candle_idx_range": {"start_idx": None, "end_idx": None},
+        "classification": None,
+        "primary_structure": {
+            "structure_id": None,
+            "structure_role": None,
+            "reaction_candle_idx": None,
+        },
+        "confirming_micro_break": {
+            "micro_level_id": None,
+            "micro_level_role": None,
+            "breach_candle_idx": None,
+            "distance_to_primary_level_pct": None,
+            "occurred_after_primary_reaction": False,
+        },
+        "supports_direction": None,
+        "conviction_impact": None,
+    }
+
+
+def _empty_micro_level_regime_context(regime_id: str) -> dict:
+    return {
+        "id": regime_id,
+        "candle_idx_range": {"start_idx": None, "end_idx": None},
+        "micro_supports_formed": None,
+        "micro_supports_held": None,
+        "micro_supports_breached": None,
+        "micro_resistances_formed": None,
+        "micro_resistances_held": None,
+        "micro_resistances_breached": None,
+        "dominant_pressure": None,
+        "regime_read": None,
+        "referenced_micro_support_ids": [],
+        "referenced_micro_resistance_ids": [],
+    }
+
+
 def _empty_micro_trend(trend_id: str) -> dict:
     return {
         "id": trend_id,
         "trend": None,
         "candle_idx_range": {"start_idx": None, "end_idx": None},
+        "confirmation_candle_idx": None,
         "accelerated": False,
         "acceleration_candle_idx_range": {"start_idx": None, "end_idx": None},
         "trend_break_candle_idx": None,
@@ -345,7 +557,7 @@ def _auto_price_action_sequences(candle_rows: list[dict]) -> list[dict]:
             if active_type is not None:
                 sequences.append((active_type, start_idx, end_idx))
             active_type = sequence_type
-            start_idx = i - 1
+            start_idx = i
             end_idx = i
 
     if active_type is not None:
@@ -425,7 +637,6 @@ def _schema_metadata(generated_at: datetime) -> dict:
         "schema_name": SCHEMA_NAME,
         "schema_version": SCHEMA_VERSION,
         "schema_release": SCHEMA_RELEASE,
-        "created_at": SCHEMA_CREATED_AT,
         "generated_at": generated_at.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "intended_marketplace_use": "AI ingestion for independent 5PM-to-5PM OHLC price-action labeling and review.",
         "raw_price_outcome_workflow": {
@@ -513,10 +724,29 @@ def _allowed_values() -> dict:
             "bearish_micro_range_engulfing",
         ],
         "micro_candlestick_patterns.directional_implication": ["buyside", "sellside", "neutral"],
-        "price_action_levels.level_role": ["support", "resistance", "micro_support", "micro_resistance"],
+        "micro_level_regime_context.dominant_pressure": [
+            "buyside_momentum",
+            "sellside_momentum",
+            "two_way_chop",
+            "neutral",
+        ],
+        "micro_level_regime_context.regime_read": [
+            "micro_supports_holding_and_micro_resistances_breaching",
+            "micro_resistances_holding_and_micro_supports_breaching",
+            "both_sides_breaching",
+            "both_sides_holding",
+            "insufficient_micro_level_evidence",
+        ],
+        "price_action_levels.level_role": ["macro_support", "macro_resistance", "micro_support", "micro_resistance"],
+        "price_action_levels.formation.validation_rule": [
+            "third_significant_reaction",
+            "manual_multi_reaction_validation",
+        ],
         "price_action_levels.label_confidence": ["high", "medium", "low"],
         "price_action_levels.confidence_reason_codes": [
+            "three_significant_reactions",
             "multiple_clean_reactions",
+            "decent_reactions",
             "formed_after_buyside_impulse",
             "formed_after_sellside_impulse",
             "no_m15_close_below_level",
@@ -529,12 +759,69 @@ def _allowed_values() -> dict:
             "no_clean_impulse_from_level",
             "inside_larger_auction",
         ],
-        "support_resistance_negative_examples.candidate_role": ["support", "resistance"],
-        "support_resistance_negative_examples.rejection_reason_codes": [
+        "price_action_levels.context_window.window_type": ["immediate_price_action"],
+        "macro_support_resistance_negative_examples.candidate_role": ["macro_support", "macro_resistance"],
+        "macro_support_resistance_negative_examples.candidate_formation.validation_status": ["rejected"],
+        "macro_support_resistance_negative_examples.reaction_sequence.reaction_type": [
+            "initial_reaction",
+            "attempted_reaction",
+            "retest",
+            "failed_reaction",
+            "lower_wick_reaction",
+            "upper_wick_reaction",
+            "duplicate_reaction_from_existing_level",
+        ],
+        "macro_support_resistance_negative_examples.reaction_sequence.reaction_quality": [
+            "strong",
+            "medium",
+            "weak",
+            "failed",
+            "weak_lower_wick",
+            "weak_upper_wick",
+            "messy_wick_cluster",
+            "duplicate_of_stronger_level",
+        ],
+        "macro_support_resistance_negative_examples.failed_validation_tests": [
+            "insufficient_significant_reactions",
+            "second_reaction_failed",
+            "third_reaction_failed",
+            "no_clean_defensive_response",
+            "reaction_immediately_failed",
+            "m15_close_through_candidate_level",
+            "duplicate_uses_same_reaction_candles_as_existing_level",
+            "candidate_reactions_explained_by_existing_level",
+            "wick_reactions_too_weak_to_establish_new_level",
+            "no_additional_structural_information",
+        ],
+        "macro_support_resistance_negative_examples.rejection_reason_codes": [
             "single_reaction_only",
             "formed_inside_chop",
             "too_close_to_stronger_level",
             "no_clear_defensive_response",
+            "reaction_immediately_failed",
+            "already_explained_by_existing_viable_level",
+            "duplicate_level_unnecessary",
+            "same_candles_as_existing_level",
+            "weak_lower_wicks_below_existing_macro_support",
+            "weak_upper_wicks_above_existing_macro_resistance",
+            "candidate_adds_no_new_structural_context",
+        ],
+        "macro_support_resistance_negative_examples.duplicate_of_existing_level.existing_level_role": [
+            "macro_support",
+            "macro_resistance",
+        ],
+        "macro_support_resistance_negative_examples.duplicate_of_existing_level.explanation_codes": [
+            "same_reaction_candles",
+            "within_existing_level_zone",
+            "existing_level_already_validated",
+            "candidate_price_is_minor_wick_extension",
+            "candidate_has_weaker_reactions_than_existing_level",
+            "no_new_retest_or_defensive_response",
+        ],
+        "macro_support_resistance_negative_examples.invalidated_by_price.invalidation_type": [
+            "m15_close_through_candidate_level",
+            "wick_sweep_and_acceptance",
+            "immediate_reversal_through_candidate_level",
         ],
         "micro_support_resistance_negative_examples.candidate_role": ["micro_support", "micro_resistance"],
         "micro_support_resistance_negative_examples.rejection_reason_codes": [
@@ -543,25 +830,108 @@ def _allowed_values() -> dict:
             "too_close_to_stronger_level",
             "no_clear_defensive_response",
         ],
-        "support_resistance_borderline_examples.candidate_role": ["support", "resistance"],
-        "support_resistance_borderline_examples.label_confidence": ["borderline"],
-        "support_resistance_borderline_examples.supporting_reason_codes": [
+        "macro_support_resistance_borderline_examples.candidate_role": ["macro_support", "macro_resistance"],
+        "macro_support_resistance_borderline_examples.candidate_formation.validation_status": ["borderline"],
+        "macro_support_resistance_borderline_examples.candidate_formation.borderline_reason": [
+            "third_reaction_was_messy",
+            "reactions_present_but_weak",
+            "level_inside_larger_auction",
+            "unclear_defensive_response",
+        ],
+        "macro_support_resistance_borderline_examples.reaction_sequence.reaction_type": [
+            "initial_reaction",
+            "secondary_reaction",
+            "validation_attempt",
+            "attempted_reaction",
+            "retest",
+        ],
+        "macro_support_resistance_borderline_examples.reaction_sequence.reaction_quality": [
+            "strong",
+            "medium",
+            "weak",
+            "borderline",
+            "failed",
+        ],
+        "macro_support_resistance_borderline_examples.supporting_reason_codes": [
+            "three_reactions_present",
             "two_minor_reactions",
             "near_prior_rejection_area",
         ],
-        "support_resistance_borderline_examples.weakness_reason_codes": [
+        "macro_support_resistance_borderline_examples.weakness_reason_codes": [
             "messy_overlap",
+            "third_reaction_not_clean",
+            "no_clean_impulse_from_level",
+            "inside_larger_auction",
+        ],
+        "micro_support_resistance_borderline_examples.candidate_role": ["micro_support", "micro_resistance"],
+        "micro_support_resistance_borderline_examples.candidate_formation.validation_status": ["borderline"],
+        "micro_support_resistance_borderline_examples.candidate_formation.borderline_reason": [
+            "third_reaction_was_messy",
+            "reactions_present_but_weak",
+            "level_inside_larger_auction",
+            "unclear_defensive_response",
+        ],
+        "micro_support_resistance_borderline_examples.reaction_sequence.reaction_type": [
+            "initial_reaction",
+            "secondary_reaction",
+            "validation_attempt",
+            "attempted_reaction",
+            "retest",
+        ],
+        "micro_support_resistance_borderline_examples.reaction_sequence.reaction_quality": [
+            "strong",
+            "medium",
+            "weak",
+            "borderline",
+            "failed",
+        ],
+        "micro_support_resistance_borderline_examples.supporting_reason_codes": [
+            "three_reactions_present",
+            "two_minor_reactions",
+            "near_prior_rejection_area",
+        ],
+        "micro_support_resistance_borderline_examples.weakness_reason_codes": [
+            "messy_overlap",
+            "third_reaction_not_clean",
             "no_clean_impulse_from_level",
             "inside_larger_auction",
         ],
         "auction_ranges.type": ["macro", "micro"],
+        "auction_ranges.validated_by_levels.validation_rule": [
+            "macro_support_and_macro_resistance_bounds_gt_0_5_pct_apart",
+            "macro_support_and_macro_resistance_bounds_lte_0_5_pct_apart",
+        ],
+        "auction_ranges.validated_by_levels.distance_classification_rule": [
+            "macro_gt_0_5_pct",
+            "micro_lte_0_5_pct",
+        ],
+        "auction_ranges.validated_by_levels.lower_bound.bound_role": ["lower_bound"],
+        "auction_ranges.validated_by_levels.upper_bound.bound_role": ["upper_bound"],
+        "auction_ranges.validated_by_levels.lower_bound.level_role": ["macro_support"],
+        "auction_ranges.validated_by_levels.upper_bound.level_role": ["macro_resistance"],
+        "auction_ranges_negative_examples.candidate_type": ["macro", "micro"],
+        "auction_ranges_negative_examples.failed_validation_tests": [
+            "insufficient_rotations",
+            "range_too_narrow",
+            "range_too_wide",
+            "no_clear_upper_and_lower_bounds",
+            "price_accepted_outside_candidate_range",
+            "candidate_range_overlaps_stronger_auction",
+        ],
+        "auction_ranges_negative_examples.rejection_reason_codes": [
+            "single_rotation_only",
+            "unclear_range_boundaries",
+            "formed_inside_directional_impulse",
+            "too_close_to_stronger_auction",
+            "immediate_range_failure",
+        ],
         "event_outcome_labels.event_type": [
-            "support_level_breach",
-            "resistance_level_breach",
-            "support_level_retest",
-            "resistance_level_retest",
-            "support_level_bounce",
-            "resistance_level_rejection",
+            "macro_support_level_breach",
+            "macro_resistance_level_breach",
+            "macro_support_level_retest",
+            "macro_resistance_level_retest",
+            "macro_support_level_bounce",
+            "macro_resistance_level_rejection",
             "macro_auction_upper_bound_breach",
             "macro_auction_lower_bound_breach",
             "micro_auction_upper_bound_sweep",
@@ -575,8 +945,8 @@ def _allowed_values() -> dict:
         ],
         "event_outcome_labels.expected_direction": ["long", "short", "neutral"],
         "event_outcome_labels.referenced_structure.structure_type": [
-            "support",
-            "resistance",
+            "macro_support",
+            "macro_resistance",
             "macro_auction_upper_bound",
             "macro_auction_lower_bound",
             "micro_auction_upper_bound",
@@ -584,27 +954,37 @@ def _allowed_values() -> dict:
             "price",
         ],
         "event_outcome_labels.referenced_structure.structure_role": [
-            "support",
-            "resistance",
+            "macro_support",
+            "macro_resistance",
             "macro_auction_upper_bound",
             "macro_auction_lower_bound",
             "micro_auction_upper_bound",
             "micro_auction_lower_bound",
             "price",
         ],
+        "event_outcome_labels.last_micro_level.level_role": ["micro_support", "micro_resistance"],
+        "event_outcome_labels.last_micro_level.significance_reason_codes": [
+            "near_referenced_macro_level",
+            "aligned_with_breach_direction",
+            "likely_retest_magnet_before_continuation",
+            "recent_micro_level_before_breach",
+            "not_near_referenced_macro_level",
+            "not_directionally_relevant",
+            "stale_or_already_invalidated",
+        ],
         "event_outcome_labels.human_interpretation.read": [
-            "support_breach_with_continuation_potential",
-            "resistance_breach_with_continuation_potential",
-            "support_hold_with_bounce_potential",
-            "resistance_hold_with_rejection_potential",
+            "macro_support_breach_with_continuation_potential",
+            "macro_resistance_breach_with_continuation_potential",
+            "macro_support_hold_with_bounce_potential",
+            "macro_resistance_hold_with_rejection_potential",
             "failed_breakout",
             "failed_breakdown",
             "auction_reentry_with_continuation_potential",
         ],
         "event_outcome_labels.human_interpretation.confidence": ["high", "medium", "low"],
         "event_outcome_labels.human_interpretation.reason_codes": [
-            "clean_close_below_support",
-            "clean_close_above_resistance",
+            "clean_close_below_macro_support",
+            "clean_close_above_macro_resistance",
             "prior_retest_failed",
             "micro_trend_aligned_sellside",
             "micro_trend_aligned_buyside",
@@ -621,13 +1001,33 @@ def _allowed_values() -> dict:
             "limited_follow_through",
         ],
         "confluence.classification": [
-            "pattern_at_support",
-            "pattern_at_resistance",
+            "pattern_at_macro_support",
+            "pattern_at_macro_resistance",
             "pattern_at_macro_auction_bound",
             "pattern_at_micro_auction_bound",
             "trend_change_at_level",
             "pattern_within_trend",
-            "pattern_at_trend_break"
+            "pattern_at_trend_break",
+            "macro_resistance_rejection_with_nearby_micro_support_breach",
+            "macro_support_bounce_with_nearby_micro_resistance_breach",
+        ],
+        "confluence.primary_structure.structure_role": [
+            "macro_support",
+            "macro_resistance",
+        ],
+        "confluence.confirming_micro_break.micro_level_role": [
+            "micro_support",
+            "micro_resistance",
+        ],
+        "confluence.supports_direction": [
+            "long",
+            "short",
+            "neutral",
+        ],
+        "confluence.conviction_impact": [
+            "increases_conviction",
+            "neutral",
+            "decreases_conviction",
         ],
     }
 
@@ -644,25 +1044,59 @@ def _field_definitions() -> dict:
         "candles.candlestick.body_size": "Absolute candle body size, calculated as abs(close - open).",
         "candles.relative_to_previous_candle": "Auto-derived relationship between the current candle and the immediately prior candle. Omitted for candle 0.",
         "auto_price_action_sequences": "Automatically derived consecutive OHLC relationship runs for higher-high/higher-low and lower-high/lower-low sequences.",
-        "auto_price_action_sequences.candle_idx_range": "Range includes the baseline candle used for the first comparison and the final candle in the consecutive run. Only higher-high/higher-low and lower-high/lower-low runs of at least four candles are emitted.",
+        "auto_price_action_sequences.candle_idx_range": "Range starts at the first candle where the sequence condition is true against the prior candle and ends at the final candle in the consecutive run. Only higher-high/higher-low and lower-high/lower-low runs of at least four candles are emitted.",
         "auto_price_action_sequences.length": "Number of candles in the sequence range, calculated as end_idx - start_idx + 1.",
         "last_24h_percent_range": "High-low range for this 24-hour session, expressed in points and percent of the session low.",
-        "price_action_levels": "Manual support, resistance, micro support, and micro resistance levels identified from price action only.",
-        "price_action_levels.candle_idx_range": "Candle range where the level was observed or established.",
+        "price_action_levels": "Manual macro support, macro resistance, micro support, and micro resistance levels identified from price action only.",
+        "price_action_levels.formation": "Reaction sequence used to validate a manual macro support, macro resistance, micro support, or micro resistance level. Use validation_reaction_idx for the reaction that makes the level valid.",
+        "price_action_levels.formation.validation_rule": "Controlled rule describing why the level is considered valid. Use third_significant_reaction when the third meaningful reaction confirms the level.",
+        "price_action_levels.candle_idx_range": "Level lifespan for macro levels. For micro levels, use this as the formation range and set end_idx to the validation candle or final candle of the immediate formation cluster.",
+        "price_action_levels.context_window": "Micro-level-only immediate relevance window. Use this to mark the short context where a micro support or micro resistance level matters for immediate price action, instead of treating it like a durable macro level.",
+        "price_action_levels.context_window.expires_after_bars": "Number of bars after validation where the micro level remains contextually relevant. Default placeholder is 3 bars.",
+        "price_action_levels.reaction_candle_indices": "Ordered candle indexes for meaningful reactions at this level, including the validation reaction when applicable.",
         "price_action_levels.holds_at_session_end": "Boolean marker for whether the level remains valid through the final candle of the session.",
-        "price_action_levels.label_confidence": "Controlled confidence label for manually identified support, resistance, micro support, and micro resistance levels.",
-        "price_action_levels.confidence_reason_codes": "Controlled reasons supporting the validity of a manually identified support, resistance, micro support, or micro resistance level.",
-        "price_action_levels.weakness_reason_codes": "Controlled reasons describing weaknesses in a manually identified support, resistance, micro support, or micro resistance level. Empty list means no weaknesses assigned.",
-        "price_action_levels.level_converted_to_*": "Structured flag for whether a support level later became a lower auction bound or a resistance level later became an upper auction bound, with the candle index and auction id if applicable.",
-        "support_resistance_negative_examples": "Standalone manual negative examples for candidate support or resistance levels that should not be labeled as valid levels.",
+        "price_action_levels.label_confidence": "Controlled confidence label for manually identified macro support, macro resistance, micro support, and micro resistance levels.",
+        "price_action_levels.confidence_reason_codes": "Controlled reasons supporting the validity of a manually identified macro support, macro resistance, micro support, or micro resistance level.",
+        "price_action_levels.weakness_reason_codes": "Controlled reasons describing weaknesses in a manually identified macro support, macro resistance, micro support, or micro resistance level. Empty list means no weaknesses assigned.",
+        "price_action_levels.confluence_ids": "Optional confluence IDs that increase or otherwise affect conviction for a macro support or macro resistance level.",
+        "price_action_levels.level_converted_to_*": "Structured flag for whether a macro support level later became a lower auction bound or a macro resistance level later became an upper auction bound, with the candle index and auction id if applicable.",
+        "macro_support_resistance_negative_examples": "Standalone manual negative examples for candidate macro support or macro resistance levels that should not be labeled as valid levels.",
+        "macro_support_resistance_negative_examples.candidate_formation": "Formation metadata for a rejected candidate macro support or macro resistance level, including origin, detection candle, required reaction count, actual significant reactions, and validation status.",
+        "macro_support_resistance_negative_examples.reaction_sequence": "Ordered attempted reactions for a rejected candidate level. Add as many reaction objects as needed to show why validation failed.",
+        "macro_support_resistance_negative_examples.duplicate_of_existing_level": "Context for rejected candidates that duplicate an already viable macro support or macro resistance level, especially when the same candles or weak wick extensions are already explained by the existing level.",
+        "macro_support_resistance_negative_examples.failed_validation_tests": "Controlled tests the candidate failed before being rejected as a valid macro support or macro resistance level.",
         "micro_support_resistance_negative_examples": "Standalone manual negative examples for candidate micro support or micro resistance levels that should not be labeled as valid micro levels.",
-        "support_resistance_borderline_examples": "Standalone manual borderline examples for candidate support or resistance levels that are ambiguous or weak.",
-        "support_resistance_negative_examples.rejection_reason_codes": "Controlled reasons describing why the candidate support or resistance example was rejected as a valid level.",
+        "macro_support_resistance_borderline_examples": "Standalone manual borderline examples for candidate macro support or macro resistance levels that are ambiguous or weak.",
+        "micro_support_resistance_borderline_examples": "Standalone manual borderline examples for candidate micro support or micro resistance levels that are ambiguous or weak.",
+        "macro_support_resistance_negative_examples.rejection_reason_codes": "Controlled reasons describing why the candidate macro support or macro resistance example was rejected as a valid level.",
+        "macro_support_resistance_negative_examples.duplicate_of_existing_level.explanation_codes": "Controlled reasons explaining why the candidate is redundant relative to an already established macro support or macro resistance level.",
+        "macro_support_resistance_negative_examples.invalidated_by_price": "Structured invalidation evidence for a rejected candidate level, including the candle index and invalidation type when price invalidated it.",
         "micro_support_resistance_negative_examples.rejection_reason_codes": "Controlled reasons describing why the candidate micro support or micro resistance example was rejected as a valid micro level.",
-        "support_resistance_borderline_examples.supporting_reason_codes": "Controlled reasons supporting a borderline candidate support or resistance level.",
-        "support_resistance_borderline_examples.weakness_reason_codes": "Controlled reasons describing weaknesses in a borderline candidate support or resistance level.",
-        "auction_ranges": "Manual macro and micro auction ranges. Macro ranges can contain multiple participation windows; micro ranges use one candle range.",
+        "macro_support_resistance_borderline_examples.candidate_formation": "Formation metadata for an ambiguous macro support or macro resistance candidate, including origin, detection candle, reaction count, validation status, and the primary borderline reason.",
+        "macro_support_resistance_borderline_examples.reaction_sequence": "Ordered reactions used to assess a borderline candidate level. Add as many reaction objects as needed.",
+        "macro_support_resistance_borderline_examples.supporting_reason_codes": "Controlled reasons supporting a borderline candidate macro support or macro resistance level.",
+        "macro_support_resistance_borderline_examples.weakness_reason_codes": "Controlled reasons describing weaknesses in a borderline candidate macro support or macro resistance level.",
+        "micro_support_resistance_borderline_examples.candidate_formation": "Formation metadata for an ambiguous micro support or micro resistance candidate, including origin, detection candle, reaction count, validation status, and the primary borderline reason.",
+        "micro_support_resistance_borderline_examples.reaction_sequence": "Ordered reactions used to assess a borderline micro candidate level. Add as many reaction objects as needed.",
+        "micro_support_resistance_borderline_examples.supporting_reason_codes": "Controlled reasons supporting a borderline candidate micro support or micro resistance level.",
+        "micro_support_resistance_borderline_examples.weakness_reason_codes": "Controlled reasons describing weaknesses in a borderline candidate micro support or micro resistance level.",
+        "auction_ranges": "Manual macro and micro auction ranges defined by macro support and macro resistance levels. Macro auctions use viable macro support/resistance bounds greater than 0.5% apart; micro auctions use viable macro support/resistance bounds equal to or less than 0.5% apart.",
+        "auction_ranges.validated_by_levels": "Macro support/resistance evidence that validates the auction range. Populate lower_bound with a macro support level and upper_bound with a macro resistance level, including level IDs, prices, level validation candles, and the candle where each bound confirmed the auction.",
+        "auction_ranges.validated_by_levels.validation_idx": "Candle index where the auction itself becomes valid after both range bounds are confirmed.",
+        "auction_ranges.validated_by_levels.validation_rule": "Controlled rule describing whether the macro support/resistance bound distance validates a macro auction (>0.5%) or a micro auction (<=0.5%).",
+        "auction_ranges.validated_by_levels.macro_support_resistance_distance_pct": "Percent distance between the validating macro support and macro resistance prices. Values greater than 0.5 classify as macro auctions; values equal to or less than 0.5 classify as micro auctions.",
+        "auction_ranges.validated_by_levels.distance_classification_rule": "Controlled label for the 0.5% support/resistance distance threshold used to classify the auction as macro or micro.",
+        "auction_ranges.validated_by_levels.additional_confirming_level_ids": "Optional extra macro support or macro resistance level IDs that reinforce the auction range but are not the primary lower or upper bound.",
+        "auction_ranges_negative_examples": "Standalone manual negative examples for candidate macro and micro auction ranges that should not be labeled as valid auction ranges.",
+        "auction_ranges_negative_examples.failed_validation_tests": "Controlled tests the candidate auction range failed before being rejected as a valid macro or micro auction range.",
+        "auction_ranges_negative_examples.rejection_reason_codes": "Controlled reasons describing why the candidate macro or micro auction range was rejected as a valid auction range.",
+        "micro_level_regime_context": "Manual local-regime summary derived from repeated micro support and micro resistance behavior. Micro supports forming and holding while micro resistances are breached indicates buyside momentum; micro resistances forming and holding while micro supports are breached indicates sellside momentum.",
+        "micro_level_regime_context.dominant_pressure": "Controlled directional pressure inferred from held-vs-breached micro support and micro resistance patterns.",
+        "micro_level_regime_context.regime_read": "Controlled explanation of the micro-level pattern that supports the dominant pressure label.",
+        "micro_level_regime_context.referenced_micro_support_ids": "Micro support IDs used as evidence for this regime context.",
+        "micro_level_regime_context.referenced_micro_resistance_ids": "Micro resistance IDs used as evidence for this regime context.",
         "micro_trends": "Manual short-range directional sequences, such as micro buyside, micro sellside, or micro ranging.",
+        "micro_trends.confirmation_candle_idx": "Candle index where the micro trend is first validated or confirmed. This may differ from candle_idx_range.start_idx when the trend starts before enough evidence exists to confirm it.",
         "micro_trends.accelerated": "Boolean marker for whether the micro trend had a distinct acceleration phase.",
         "micro_trends.acceleration_candle_idx_range": "Optional candle range where the micro trend accelerated. Leave indexes null when accelerated is false.",
         "micro_trends.trend_break_candle_idx": "Candle index where the micro trend breaks. This should match candle_idx_range.end_idx.",
@@ -675,9 +1109,19 @@ def _field_definitions() -> dict:
         "event_outcome_labels": "Manual event logs linking a structural price-action event to its referenced structure, context, human interpretation, and raw lookahead outcome.",
         "event_outcome_labels.referenced_structure": "Level, auction bound, or price structure referenced by the event.",
         "event_outcome_labels.context_refs": "Optional links from the event to micro trend, auction, and confluence labels.",
+        "event_outcome_labels.last_micro_level": "Most recent micro support or micro resistance level before the event candle. Use this to mark whether price may revisit that micro level after a macro support or macro resistance breach before continuing.",
+        "event_outcome_labels.last_micro_level.has_significance": "Boolean marker for whether the last micro level is near or otherwise related to the referenced macro level breach/retest context. False means the micro level has little or no relevance to the event.",
+        "event_outcome_labels.last_micro_level.distance_to_referenced_structure_pct": "Percent distance between the last micro level price and the referenced macro support, macro resistance, or auction-bound price.",
+        "event_outcome_labels.last_micro_level.significance_reason_codes": "Controlled reasons explaining why the last micro level is or is not significant to the event outcome.",
         "event_outcome_labels.human_interpretation": "Manual interpretation of the event, including controlled read, confidence, supporting reasons, and counterevidence.",
         "event_outcome_labels.raw_price_outcome": "Autopopulated by populate_raw_price_outcomes.py after manual event labeling. Contains raw lookahead outcome measurements across standard 8, 16, 24, and 48 candle windows in the completed JSON copy.",
-        "confluence": "Manual combined events where a pattern or trend change aligns with a level or auction structure.",
+        "confluence": "Manual combined events where a pattern, trend change, or sequential micro-level break aligns with a level or auction structure.",
+        "confluence.primary_structure": "Primary macro support or macro resistance structure involved in the confluence, including the reaction candle that came before the confirming signal.",
+        "confluence.confirming_micro_break": "Optional sequential confluence where price rejects from macro resistance then breaches nearby micro support, or bounces from macro support then breaches nearby micro resistance.",
+        "confluence.confirming_micro_break.distance_to_primary_level_pct": "Percent distance between the confirming micro level and the primary macro support or macro resistance level.",
+        "confluence.confirming_micro_break.occurred_after_primary_reaction": "Boolean marker confirming the micro break occurred after the primary macro support/resistance reaction.",
+        "confluence.supports_direction": "Directional implication supported by the confluence.",
+        "confluence.conviction_impact": "Whether this confluence increases, decreases, or does not materially change conviction in the referenced level or event.",
         "setup_tags": "Optional controlled setup tags for retrieval or AI filtering; empty list means no setup tags assigned.",
         "data_quality": "Automatically generated completeness metadata for the OHLC session.",
         "validation_rules": "Machine-readable validation rules for required sections, session length, candle count, timezone values, and manual-label references.",
@@ -763,6 +1207,8 @@ def build_json(
             "section_keys": [
                 "price_action_levels",
                 "auction_ranges",
+                "auction_ranges_negative_examples",
+                "micro_level_regime_context",
                 "micro_trends",
                 "micro_candlestick_patterns",
             ],
@@ -784,24 +1230,34 @@ def build_json(
         "candles": candles,
         "auto_price_action_sequences": _auto_price_action_sequences(candle_rows),
         "price_action_levels": {
-            "support": [_empty_support_level(f"support_{i}") for i in range(1, 4)],
-            "resistance": [_empty_resistance_level(f"resistance_{i}") for i in range(1, 4)],
+            "macro_support": [_empty_support_level(f"macro_support_{i}") for i in range(1, 4)],
+            "macro_resistance": [_empty_resistance_level(f"macro_resistance_{i}") for i in range(1, 4)],
             "micro_support": [_empty_micro_level(f"micro_support_{i}") for i in range(1, 4)],
             "micro_resistance": [_empty_micro_level(f"micro_resistance_{i}") for i in range(1, 4)],
         },
-        "support_resistance_negative_examples": [
-            _empty_support_resistance_negative_example(f"support_resistance_negative_{i}") for i in range(1, 4)
+        "macro_support_resistance_negative_examples": [
+            _empty_macro_support_resistance_negative_example(f"macro_support_resistance_negative_{i}") for i in range(1, 4)
         ],
         "micro_support_resistance_negative_examples": [
-            _empty_micro_support_resistance_negative_example(f"micro_support_resistance_negative_{i}") for i in range(1, 4)
+            _empty_micro_support_resistance_negative_example(f"micro_support_resistance_negative_{i}") for i in range(1, 7)
         ],
-        "support_resistance_borderline_examples": [
-            _empty_support_resistance_borderline_example(f"support_resistance_borderline_{i}") for i in range(1, 4)
+        "macro_support_resistance_borderline_examples": [
+            _empty_macro_support_resistance_borderline_example(f"macro_support_resistance_borderline_{i}") for i in range(1, 4)
+        ],
+        "micro_support_resistance_borderline_examples": [
+            _empty_micro_support_resistance_borderline_example(f"micro_support_resistance_borderline_{i}") for i in range(1, 6)
         ],
         "auction_ranges": {
-            "macro": [{"id": f"macro_auction_{i}", "low": None, "high": None, "candles_within": [_empty_candle_range()]} for i in range(1, 4)],
-            "micro": [{"id": f"micro_auction_{i}", "low": None, "high": None, "candle_idx_range": _empty_candle_range()} for i in range(1, 4)],
+            "macro": [_empty_macro_auction_range(f"macro_auction_{i}") for i in range(1, 4)],
+            "micro": [_empty_micro_auction_range(f"micro_auction_{i}") for i in range(1, 4)],
         },
+        "auction_ranges_negative_examples": {
+            "macro": [_empty_macro_auction_range_negative_example("macro_auction_negative_1")],
+            "micro": [_empty_micro_auction_range_negative_example("micro_auction_negative_1")],
+        },
+        "micro_level_regime_context": [
+            _empty_micro_level_regime_context(f"micro_level_regime_{i}") for i in range(1, 4)
+        ],
         "micro_trends": [
             _empty_micro_trend(f"micro_trend_{i}") for i in range(1, 6)
         ],
@@ -826,27 +1282,7 @@ def build_json(
             }
         ],
         "confluence": [
-            {
-                "id": "confluence_1",
-                "pattern_id": None,
-                "level_id": None,
-                "candle_idx_range": {"start_idx": None, "end_idx": None},
-                "classification": None,
-            },
-            {
-                "id": "confluence_2",
-                "pattern_id": None,
-                "level_id": None,
-                "candle_idx_range": {"start_idx": None, "end_idx": None},
-                "classification": None,
-            },
-            {
-                "id": "confluence_3",
-                "pattern_id": None,
-                "level_id": None,
-                "candle_idx_range": {"start_idx": None, "end_idx": None},
-                "classification": None,
-            }
+            _empty_confluence(f"confluence_{i}") for i in range(1, 4)
         ],
         "event_outcome_labels": [
             _empty_event_outcome_label(f"event_{i}") for i in range(1, 7)
