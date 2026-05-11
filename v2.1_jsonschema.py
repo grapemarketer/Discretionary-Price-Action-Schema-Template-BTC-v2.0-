@@ -8,9 +8,9 @@ template, and renders a simple candlestick chart.
 
 Usage
 -----
-  python v2.0_jsonschema.py "1/20/26 (EST)"
-  python v2.0_jsonschema.py "1/20/26 EDT" --symbol ETHUSDT
-  python v2.0_jsonschema.py "1/20/26 (EST)" --output ctx.json --no-chart
+  python v2.1_jsonschema.py "1/20/26 (EST)"
+  python v2.1_jsonschema.py "1/20/26 EDT" --symbol ETHUSDT
+  python v2.1_jsonschema.py "1/20/26 (EST)" --output ctx.json --no-chart
 
 Dependencies
 ------------
