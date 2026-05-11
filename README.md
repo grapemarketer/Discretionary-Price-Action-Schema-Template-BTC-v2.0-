@@ -334,6 +334,14 @@ These are stored under:
 
 ```json
 "raw_price_outcome": {
+  "outcome_population_warnings": [],
+  "event_distance_features": {
+    "event_close_to_structure_pct": -0.03,
+    "event_high_to_structure_pct": 0.12,
+    "event_low_to_structure_pct": -0.18,
+    "close_beyond_structure_pct": 0.03,
+    "wick_beyond_structure_pct": 0.18
+  },
   "standard_windows": {
     "1": {},
     "2": {},
@@ -355,11 +363,36 @@ Each window contains:
   "outcome_measured": true,
   "bars_measured": 24,
   "lookahead_end_idx": 66,
+  "full_window_available": true,
+  "anchor_price": 62550.25,
+  "anchor_price_source": "event_candle_close",
   "max_favorable_excursion_pct": 1.2345,
   "max_adverse_excursion_pct": 0.4567,
+  "max_favorable_close_excursion_pct": 0.9876,
+  "max_adverse_close_excursion_pct": 0.321,
+  "final_close_return_pct": 0.7425,
+  "closed_in_expected_direction": true,
+  "continuation_threshold_pct": 0.25,
   "continuation_occurred": true,
+  "favorable_threshold_hit": true,
+  "first_favorable_threshold_hit_idx": 47,
+  "bars_until_favorable_threshold": 5,
   "invalidation_occurred": false,
   "structure_reclaimed": false,
+  "invalidation_rule": "m15_close_back_above_structure_price",
+  "adverse_before_max_favorable": false,
+  "threshold_hits": {
+    "0.25": {
+      "hit": true,
+      "first_hit_idx": 47,
+      "bars_until_hit": 5
+    },
+    "0.5": {
+      "hit": false,
+      "first_hit_idx": null,
+      "bars_until_hit": null
+    }
+  },
   "bars_until_max_favorable": 10,
   "bars_until_max_adverse": 3
 }
@@ -375,9 +408,53 @@ For short events:
 - favorable movement is measured from the event close to the lowest future low
 - adverse movement is measured from the event close to the highest future high
 
-If `referenced_structure.structure_price` is provided, the helper also checks whether the structure was reclaimed or invalidated during the lookahead window.
+The event candle close is recorded as `anchor_price` with `anchor_price_source: "event_candle_close"`. This is a standardized measurement anchor, not necessarily a trade entry.
+
+`continuation_occurred` is true only when max favorable wick excursion reaches `continuation_threshold_pct`. The current threshold is `0.25` percent. This avoids treating tiny favorable noise as a continuation.
+
+The helper also records favorable threshold timing for:
+
+```json
+[0.15, 0.25, 0.35, 0.5, 0.65, 0.75, 0.85, 1.0, 1.5, 2.0]
+```
+
+These are stored in `threshold_hits`. The fields `favorable_threshold_hit`, `first_favorable_threshold_hit_idx`, and `bars_until_favorable_threshold` are aliases for the primary continuation threshold.
+
+Close-based outcomes are included separately from wick-based MFE/MAE:
+
+- `max_favorable_close_excursion_pct`
+- `max_adverse_close_excursion_pct`
+- `final_close_return_pct`
+- `closed_in_expected_direction`
+
+This preserves the difference between a wick excursion and accepted candle closes.
+
+If `referenced_structure.structure_price` is provided, the helper checks whether the structure was reclaimed or invalidated during the lookahead window. The rule used is stored in `invalidation_rule`. The rule is event-type aware where possible:
+
+- support breach: close back above structure price
+- resistance breach: close back below structure price
+- support retest or bounce: close below structure price
+- resistance retest or rejection: close above structure price
+- upper auction-bound breach or sweep: close back below structure price
+- lower auction-bound breach or sweep: close back above structure price
+
+If the event type is missing or not recognized, the helper falls back to direction-based invalidation.
+
+`adverse_before_max_favorable` indicates whether the max adverse wick occurred before the max favorable wick. This helps distinguish clean continuation from setups that first punished early entries.
+
+`full_window_available` is true only when the complete requested lookahead window was available. `bars_measured` still records partial windows when fewer candles were available.
 
 Only events with an integer `event_candle_idx` and `expected_direction` of `long` or `short` are measured. Neutral or incomplete events remain unmeasured.
+
+When an event is not measured, unmeasured boolean-like fields are `null`, not `false`. This keeps unknown outcomes distinct from measured failures for ML training.
+
+The helper writes `outcome_population_warnings` per event when references are missing or incomplete, including:
+
+- missing or invalid `event_candle_idx`
+- missing `expected_direction`
+- missing `referenced_structure.structure_price`
+- missing `event_type`
+- missing or incomplete `labeling_status`
 
 ## Extra Lookahead Candles
 
@@ -408,13 +485,16 @@ The helper also writes:
 ```json
 "raw_price_outcome_population": {
   "standard_windows_bars": [1, 2, 4, 6, 8, 10, 16, 24, 48],
+  "continuation_threshold_pct": 0.25,
+  "favorable_thresholds_pct": [0.15, 0.25, 0.35, 0.5, 0.65, 0.75, 0.85, 1.0, 1.5, 2.0],
   "manual_labeling_candles_unchanged": true,
   "extra_lookahead_candles_fetched": 0,
-  "extra_lookahead_data_usage": "..."
+  "extra_lookahead_data_usage": "...",
+  "warnings": []
 }
 ```
 
-This records how the outcome fields were populated and confirms that the original manual labeling candles were not modified.
+This records how the outcome fields were populated, the active thresholds, any event-level population warnings, and confirms that the original manual labeling candles were not modified.
 
 ## Important Boundaries
 
