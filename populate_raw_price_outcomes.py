@@ -18,6 +18,8 @@ from urllib.request import urlopen
 
 
 RAW_PRICE_OUTCOME_WINDOWS = (1, 2, 4, 6, 8, 10, 16, 24, 48)
+CONTINUATION_THRESHOLD_PCT = 0.2
+FAVORABLE_THRESHOLDS_PCT = (0.15, 0.25, 0.35, 0.5, 0.65, 0.75, 0.85, 1.0, 1.5, 2.0)
 PCT_DECIMALS = 4
 BINANCE_URL = "https://fapi.binance.com/fapi/v1/klines"
 TIMEFRAME = "15m"
@@ -174,6 +176,8 @@ def _record_lookahead_population_metadata(
 ) -> None:
     metadata = {
         "standard_windows_bars": list(RAW_PRICE_OUTCOME_WINDOWS),
+        "continuation_threshold_pct": CONTINUATION_THRESHOLD_PCT,
+        "favorable_thresholds_pct": list(FAVORABLE_THRESHOLDS_PCT),
         "manual_labeling_candles_unchanged": True,
         "extra_lookahead_candles_fetched": len(extra_candles),
         "extra_lookahead_data_usage": (
@@ -207,18 +211,155 @@ def _pct(value: float, anchor: float) -> float:
     return round((value / anchor) * 100, PCT_DECIMALS)
 
 
+def _signed_pct(value: float, anchor: float) -> float | None:
+    if anchor == 0:
+        return 0.0
+    return round(((value - anchor) / anchor) * 100, PCT_DECIMALS)
+
+
+def _is_number(raw: Any) -> bool:
+    return isinstance(raw, (int, float)) and not isinstance(raw, bool)
+
+
+def _structure_price(event: dict[str, Any]) -> float | None:
+    referenced_structure = event.get("referenced_structure") or {}
+    if not isinstance(referenced_structure, dict):
+        return None
+    structure_price_raw = referenced_structure.get("structure_price")
+    return float(structure_price_raw) if _is_number(structure_price_raw) else None
+
+
+def _invalidation_rule(event_type: str | None, direction: str) -> tuple[str, str]:
+    if isinstance(event_type, str):
+        if "support" in event_type and "breach" in event_type:
+            return "m15_close_back_above_structure_price", "above"
+        if "resistance" in event_type and "breach" in event_type:
+            return "m15_close_back_below_structure_price", "below"
+        if "support" in event_type and ("retest" in event_type or "bounce" in event_type):
+            return "m15_close_below_structure_price", "below"
+        if "resistance" in event_type and ("retest" in event_type or "rejection" in event_type):
+            return "m15_close_above_structure_price", "above"
+        if "upper_bound" in event_type and ("breach" in event_type or "sweep" in event_type):
+            return "m15_close_back_below_structure_price", "below"
+        if "lower_bound" in event_type and ("breach" in event_type or "sweep" in event_type):
+            return "m15_close_back_above_structure_price", "above"
+
+    if direction == "short":
+        return "m15_close_back_above_structure_price_direction_fallback", "above"
+    if direction == "long":
+        return "m15_close_back_below_structure_price_direction_fallback", "below"
+    return "no_invalidation_rule", "none"
+
+
 def _is_reclaim_or_invalidation(
+    event_type: str | None,
     direction: str,
     structure_price: float | None,
     lookahead_candles: list[dict[str, Any]],
-) -> bool:
-    if structure_price is None:
-        return False
-    if direction == "short":
-        return any(float(candle["c"]) > structure_price for candle in lookahead_candles)
-    if direction == "long":
-        return any(float(candle["c"]) < structure_price for candle in lookahead_candles)
-    return False
+) -> tuple[bool | None, str]:
+    rule_name, rule_side = _invalidation_rule(event_type, direction)
+    if structure_price is None or rule_side == "none":
+        return None, rule_name
+    if rule_side == "above":
+        return any(float(candle["c"]) > structure_price for candle in lookahead_candles), rule_name
+    if rule_side == "below":
+        return any(float(candle["c"]) < structure_price for candle in lookahead_candles), rule_name
+    return None, rule_name
+
+
+def _threshold_hits(
+    direction: str,
+    event_idx: int,
+    anchor_price: float,
+    lookahead_candles: list[dict[str, Any]],
+) -> dict[str, dict[str, Any]]:
+    hits: dict[str, dict[str, Any]] = {}
+    for threshold in FAVORABLE_THRESHOLDS_PCT:
+        first_hit_idx = None
+        for candle in lookahead_candles:
+            if direction == "short":
+                favorable_pct = _pct(anchor_price - float(candle["l"]), anchor_price)
+            else:
+                favorable_pct = _pct(float(candle["h"]) - anchor_price, anchor_price)
+            if favorable_pct >= threshold:
+                first_hit_idx = candle["idx"]
+                break
+        key = f"{threshold:g}"
+        hits[key] = {
+            "hit": first_hit_idx is not None,
+            "first_hit_idx": first_hit_idx,
+            "bars_until_hit": first_hit_idx - event_idx if first_hit_idx is not None else None,
+        }
+    return hits
+
+
+def _event_distance_features(
+    event: dict[str, Any],
+    event_candle: dict[str, Any] | None,
+    direction: str | None,
+    structure_price: float | None,
+) -> dict[str, Any]:
+    blank = {
+        "event_close_to_structure_pct": None,
+        "event_high_to_structure_pct": None,
+        "event_low_to_structure_pct": None,
+        "close_beyond_structure_pct": None,
+        "wick_beyond_structure_pct": None,
+    }
+    if event_candle is None or structure_price is None:
+        return blank
+
+    close = float(event_candle["c"])
+    high = float(event_candle["h"])
+    low = float(event_candle["l"])
+    blank.update(
+        {
+            "event_close_to_structure_pct": _signed_pct(close, structure_price),
+            "event_high_to_structure_pct": _signed_pct(high, structure_price),
+            "event_low_to_structure_pct": _signed_pct(low, structure_price),
+        }
+    )
+
+    event_type = event.get("event_type")
+    if isinstance(event_type, str) and ("support" in event_type or "lower_bound" in event_type):
+        blank["close_beyond_structure_pct"] = _pct(structure_price - close, structure_price)
+        blank["wick_beyond_structure_pct"] = _pct(structure_price - low, structure_price)
+    elif isinstance(event_type, str) and ("resistance" in event_type or "upper_bound" in event_type):
+        blank["close_beyond_structure_pct"] = _pct(close - structure_price, structure_price)
+        blank["wick_beyond_structure_pct"] = _pct(high - structure_price, structure_price)
+    elif direction == "short":
+        blank["close_beyond_structure_pct"] = _pct(structure_price - close, structure_price)
+        blank["wick_beyond_structure_pct"] = _pct(structure_price - low, structure_price)
+    elif direction == "long":
+        blank["close_beyond_structure_pct"] = _pct(close - structure_price, structure_price)
+        blank["wick_beyond_structure_pct"] = _pct(high - structure_price, structure_price)
+    return blank
+
+
+def _event_population_warnings(
+    event: dict[str, Any],
+    candles_by_idx: dict[int, dict[str, Any]],
+) -> list[str]:
+    warnings = []
+    event_idx = event.get("event_candle_idx")
+    if not isinstance(event_idx, int):
+        warnings.append("event_candle_idx_missing_or_not_integer")
+    elif event_idx not in candles_by_idx:
+        warnings.append("event_candle_idx_not_found")
+
+    if event.get("expected_direction") not in {"long", "short"}:
+        warnings.append("expected_direction_missing_or_not_measurable")
+    if not isinstance(event.get("event_type"), str) or not event.get("event_type"):
+        warnings.append("event_type_missing")
+    if _structure_price(event) is None:
+        warnings.append("referenced_structure.structure_price_missing")
+
+    labeling_status = event.get("labeling_status")
+    if not isinstance(labeling_status, str) or not labeling_status:
+        warnings.append("labeling_status_missing")
+    elif labeling_status.lower() in {"unlabeled", "pending", "todo", "incomplete"}:
+        warnings.append(f"labeling_status_{labeling_status.lower()}")
+    return warnings
 
 
 def _blank_outcome() -> dict[str, Any]:
@@ -226,11 +367,32 @@ def _blank_outcome() -> dict[str, Any]:
         "outcome_measured": False,
         "bars_measured": None,
         "lookahead_end_idx": None,
+        "full_window_available": False,
+        "anchor_price": None,
+        "anchor_price_source": "event_candle_close",
         "max_favorable_excursion_pct": None,
         "max_adverse_excursion_pct": None,
-        "continuation_occurred": False,
-        "invalidation_occurred": False,
-        "structure_reclaimed": False,
+        "max_favorable_close_excursion_pct": None,
+        "max_adverse_close_excursion_pct": None,
+        "final_close_return_pct": None,
+        "closed_in_expected_direction": None,
+        "continuation_threshold_pct": CONTINUATION_THRESHOLD_PCT,
+        "continuation_occurred": None,
+        "favorable_threshold_hit": None,
+        "first_favorable_threshold_hit_idx": None,
+        "bars_until_favorable_threshold": None,
+        "invalidation_occurred": None,
+        "structure_reclaimed": None,
+        "invalidation_rule": None,
+        "adverse_before_max_favorable": None,
+        "threshold_hits": {
+            f"{threshold:g}": {
+                "hit": None,
+                "first_hit_idx": None,
+                "bars_until_hit": None,
+            }
+            for threshold in FAVORABLE_THRESHOLDS_PCT
+        },
         "bars_until_max_favorable": None,
         "bars_until_max_adverse": None,
     }
@@ -255,32 +417,62 @@ def _measure_event_window(
     if not lookahead_candles:
         return _blank_outcome()
 
-    entry_close = float(event_candle["c"])
+    anchor_price = float(event_candle["c"])
     if direction == "short":
         favorable_candle = min(lookahead_candles, key=lambda candle: float(candle["l"]))
         adverse_candle = max(lookahead_candles, key=lambda candle: float(candle["h"]))
-        favorable_pct = _pct(entry_close - float(favorable_candle["l"]), entry_close)
-        adverse_pct = _pct(float(adverse_candle["h"]) - entry_close, entry_close)
+        favorable_close_candle = min(lookahead_candles, key=lambda candle: float(candle["c"]))
+        adverse_close_candle = max(lookahead_candles, key=lambda candle: float(candle["c"]))
+        favorable_pct = _pct(anchor_price - float(favorable_candle["l"]), anchor_price)
+        adverse_pct = _pct(float(adverse_candle["h"]) - anchor_price, anchor_price)
+        favorable_close_pct = _pct(anchor_price - float(favorable_close_candle["c"]), anchor_price)
+        adverse_close_pct = _pct(float(adverse_close_candle["c"]) - anchor_price, anchor_price)
+        final_close_return_pct = _pct(anchor_price - float(lookahead_candles[-1]["c"]), anchor_price)
     else:
         favorable_candle = max(lookahead_candles, key=lambda candle: float(candle["h"]))
         adverse_candle = min(lookahead_candles, key=lambda candle: float(candle["l"]))
-        favorable_pct = _pct(float(favorable_candle["h"]) - entry_close, entry_close)
-        adverse_pct = _pct(entry_close - float(adverse_candle["l"]), entry_close)
+        favorable_close_candle = max(lookahead_candles, key=lambda candle: float(candle["c"]))
+        adverse_close_candle = min(lookahead_candles, key=lambda candle: float(candle["c"]))
+        favorable_pct = _pct(float(favorable_candle["h"]) - anchor_price, anchor_price)
+        adverse_pct = _pct(anchor_price - float(adverse_candle["l"]), anchor_price)
+        favorable_close_pct = _pct(float(favorable_close_candle["c"]) - anchor_price, anchor_price)
+        adverse_close_pct = _pct(anchor_price - float(adverse_close_candle["c"]), anchor_price)
+        final_close_return_pct = _pct(float(lookahead_candles[-1]["c"]) - anchor_price, anchor_price)
 
-    referenced_structure = event.get("referenced_structure") or {}
-    structure_price_raw = referenced_structure.get("structure_price")
-    structure_price = float(structure_price_raw) if isinstance(structure_price_raw, (int, float)) else None
-    structure_reclaimed = _is_reclaim_or_invalidation(direction, structure_price, lookahead_candles)
+    structure_price = _structure_price(event)
+    structure_reclaimed, invalidation_rule = _is_reclaim_or_invalidation(
+        event.get("event_type"),
+        direction,
+        structure_price,
+        lookahead_candles,
+    )
+
+    threshold_hits = _threshold_hits(direction, event_idx, anchor_price, lookahead_candles)
+    continuation_threshold_hit = threshold_hits[f"{CONTINUATION_THRESHOLD_PCT:g}"]
 
     return {
         "outcome_measured": True,
         "bars_measured": len(lookahead_candles),
         "lookahead_end_idx": lookahead_candles[-1]["idx"],
+        "full_window_available": len(lookahead_candles) == window_bars,
+        "anchor_price": anchor_price,
+        "anchor_price_source": "event_candle_close",
         "max_favorable_excursion_pct": favorable_pct,
         "max_adverse_excursion_pct": adverse_pct,
-        "continuation_occurred": favorable_pct > 0,
+        "max_favorable_close_excursion_pct": favorable_close_pct,
+        "max_adverse_close_excursion_pct": adverse_close_pct,
+        "final_close_return_pct": final_close_return_pct,
+        "closed_in_expected_direction": final_close_return_pct > 0,
+        "continuation_threshold_pct": CONTINUATION_THRESHOLD_PCT,
+        "continuation_occurred": favorable_pct >= CONTINUATION_THRESHOLD_PCT,
+        "favorable_threshold_hit": continuation_threshold_hit["hit"],
+        "first_favorable_threshold_hit_idx": continuation_threshold_hit["first_hit_idx"],
+        "bars_until_favorable_threshold": continuation_threshold_hit["bars_until_hit"],
         "invalidation_occurred": structure_reclaimed,
         "structure_reclaimed": structure_reclaimed,
+        "invalidation_rule": invalidation_rule,
+        "adverse_before_max_favorable": adverse_candle["idx"] < favorable_candle["idx"],
+        "threshold_hits": threshold_hits,
         "bars_until_max_favorable": favorable_candle["idx"] - event_idx,
         "bars_until_max_adverse": adverse_candle["idx"] - event_idx,
     }
@@ -290,7 +482,18 @@ def _measure_event_standard_windows(
     event: dict[str, Any],
     candles_by_idx: dict[int, dict[str, Any]],
 ) -> dict[str, Any]:
+    event_idx = event.get("event_candle_idx")
+    event_candle = candles_by_idx.get(event_idx) if isinstance(event_idx, int) else None
+    direction = event.get("expected_direction")
+    direction_for_features = direction if direction in {"long", "short"} else None
     return {
+        "outcome_population_warnings": _event_population_warnings(event, candles_by_idx),
+        "event_distance_features": _event_distance_features(
+            event,
+            event_candle,
+            direction_for_features,
+            _structure_price(event),
+        ),
         "standard_windows": {
             str(window): _measure_event_window(event, candles_by_idx, window)
             for window in RAW_PRICE_OUTCOME_WINDOWS
@@ -309,14 +512,25 @@ def populate_raw_price_outcomes(data: dict[str, Any]) -> int:
     extra_candles = _extra_lookahead_candles_if_needed(data, candles, events)
     candles_by_idx = _candle_by_idx(candles + extra_candles)
     populated = 0
+    population_warnings = []
     for event in events:
         if not isinstance(event, dict):
+            population_warnings.append({"event_id": None, "warnings": ["event_not_object"]})
             continue
         outcome = _measure_event_standard_windows(event, candles_by_idx)
         event["raw_price_outcome"] = outcome
+        if outcome["outcome_population_warnings"]:
+            population_warnings.append(
+                {
+                    "event_id": event.get("id"),
+                    "event_candle_idx": event.get("event_candle_idx"),
+                    "warnings": outcome["outcome_population_warnings"],
+                }
+            )
         if any(window["outcome_measured"] for window in outcome["standard_windows"].values()):
             populated += 1
     _record_lookahead_population_metadata(data, extra_candles)
+    data["raw_price_outcome_population"]["warnings"] = population_warnings
     return populated
 
 
