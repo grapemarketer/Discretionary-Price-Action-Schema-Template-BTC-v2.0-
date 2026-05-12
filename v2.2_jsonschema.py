@@ -8,9 +8,9 @@ template, and renders a simple candlestick chart.
 
 Usage
 -----
-  python v2.1_jsonschema.py "1/20/26 (EST)"
-  python v2.1_jsonschema.py "1/20/26 EDT" --symbol ETHUSDT
-  python v2.1_jsonschema.py "1/20/26 (EST)" --output ctx.json --no-chart
+  python v2.2_jsonschema.py "1/20/26 (EST)"
+  python v2.2_jsonschema.py "1/20/26 EDT" --symbol ETHUSDT
+  python v2.2_jsonschema.py "1/20/26 (EST)" --output ctx.json --no-chart
 
 Dependencies
 ------------
@@ -38,8 +38,8 @@ DEFAULT_SYMBOL = "BTCUSDT"
 SESSION_START_HOUR = 17
 SESSION_END_HOUR = 17
 SCHEMA_NAME = "PriceActionOnlySession15m"
-SCHEMA_VERSION = 20
-SCHEMA_RELEASE = "v2.1"
+SCHEMA_VERSION = 21
+SCHEMA_RELEASE = "v2.2"
 RAW_PRICE_OUTCOME_WINDOWS = (1, 2, 4, 6, 8, 10, 16, 24, 48)
 
 TZ_OFFSETS: dict[str, int] = {"EST": -5, "EDT": -4}
@@ -461,7 +461,7 @@ def _empty_confluence(confluence_id: str) -> dict:
         "pattern_id": None,
         "level_id": None,
         "candle_idx_range": {"start_idx": None, "end_idx": None},
-        "classification": None,
+        "classifications": [],
         "primary_structure": {
             "structure_id": None,
             "structure_role": None,
@@ -473,6 +473,13 @@ def _empty_confluence(confluence_id: str) -> dict:
             "breach_candle_idx": None,
             "distance_to_primary_level_pct": None,
             "occurred_after_primary_reaction": False,
+        },
+        "coincident_micro_break": {
+            "micro_level_id": None,
+            "micro_level_role": None,
+            "breach_candle_idx": None,
+            "same_candle_as_primary_breach": False,
+            "distance_to_primary_level_pct": None,
         },
         "supports_direction": None,
         "conviction_impact": None,
@@ -759,7 +766,7 @@ def _allowed_values() -> dict:
             "no_clean_impulse_from_level",
             "inside_larger_auction",
         ],
-        "price_action_levels.context_window.window_type": ["immediate_price_action"],
+        "price_action_levels.context_window.window_type": ["immediate_price_action", "extended_price_action"],
         "macro_support_resistance_negative_examples.candidate_role": ["macro_support", "macro_resistance"],
         "macro_support_resistance_negative_examples.candidate_formation.validation_status": ["rejected"],
         "macro_support_resistance_negative_examples.reaction_sequence.reaction_type": [
@@ -833,10 +840,12 @@ def _allowed_values() -> dict:
         "macro_support_resistance_borderline_examples.candidate_role": ["macro_support", "macro_resistance"],
         "macro_support_resistance_borderline_examples.candidate_formation.validation_status": ["borderline"],
         "macro_support_resistance_borderline_examples.candidate_formation.borderline_reason": [
-            "third_reaction_was_messy",
+            "third_reaction_was_unclear",
             "reactions_present_but_weak",
             "level_inside_larger_auction",
             "unclear_defensive_response",
+            "bullish_micro_structure",
+            "bearish_micro_structure",
         ],
         "macro_support_resistance_borderline_examples.reaction_sequence.reaction_type": [
             "initial_reaction",
@@ -862,11 +871,13 @@ def _allowed_values() -> dict:
             "third_reaction_not_clean",
             "no_clean_impulse_from_level",
             "inside_larger_auction",
+            "bullish_micro_structure",
+            "bearish_micro_structure",
         ],
         "micro_support_resistance_borderline_examples.candidate_role": ["micro_support", "micro_resistance"],
         "micro_support_resistance_borderline_examples.candidate_formation.validation_status": ["borderline"],
         "micro_support_resistance_borderline_examples.candidate_formation.borderline_reason": [
-            "third_reaction_was_messy",
+            "third_reaction_was_unclear",
             "reactions_present_but_weak",
             "level_inside_larger_auction",
             "unclear_defensive_response",
@@ -942,6 +953,7 @@ def _allowed_values() -> dict:
             "micro_auction_lower_bound_breach",
             "auction_reentry",
             "failed_reclaim",
+            "macro_and_micro_breach_same_candle",
         ],
         "event_outcome_labels.expected_direction": ["long", "short", "neutral"],
         "event_outcome_labels.referenced_structure.structure_type": [
@@ -971,6 +983,7 @@ def _allowed_values() -> dict:
             "not_near_referenced_macro_level",
             "not_directionally_relevant",
             "stale_or_already_invalidated",
+            "micro_breach_same_candle_as_macro_breach",
         ],
         "event_outcome_labels.human_interpretation.read": [
             "macro_support_breach_with_continuation_potential",
@@ -1000,7 +1013,7 @@ def _allowed_values() -> dict:
             "immediate_structure_reclaim",
             "limited_follow_through",
         ],
-        "confluence.classification": [
+        "confluence.classifications": [
             "pattern_at_macro_support",
             "pattern_at_macro_resistance",
             "pattern_at_macro_auction_bound",
@@ -1010,12 +1023,18 @@ def _allowed_values() -> dict:
             "pattern_at_trend_break",
             "macro_resistance_rejection_with_nearby_micro_support_breach",
             "macro_support_bounce_with_nearby_micro_resistance_breach",
+            "micro_support_breach_and_macro_support_breach",
+            "micro_resistance_breach_and_macro_resistance_breach",
         ],
         "confluence.primary_structure.structure_role": [
             "macro_support",
             "macro_resistance",
         ],
         "confluence.confirming_micro_break.micro_level_role": [
+            "micro_support",
+            "micro_resistance",
+        ],
+        "confluence.coincident_micro_break.micro_level_role": [
             "micro_support",
             "micro_resistance",
         ],
@@ -1050,7 +1069,7 @@ def _field_definitions() -> dict:
         "price_action_levels": "Manual macro support, macro resistance, micro support, and micro resistance levels identified from price action only.",
         "price_action_levels.formation": "Reaction sequence used to validate a manual macro support, macro resistance, micro support, or micro resistance level. Use validation_reaction_idx for the reaction that makes the level valid.",
         "price_action_levels.formation.validation_rule": "Controlled rule describing why the level is considered valid. Use third_significant_reaction when the third meaningful reaction confirms the level.",
-        "price_action_levels.candle_idx_range": "Level lifespan for macro levels. For micro levels, use this as the formation range and set end_idx to the validation candle or final candle of the immediate formation cluster.",
+        "price_action_levels.candle_idx_range": "Level lifecycle for macro and micro support/resistance levels. Use start_idx for the first formation candle, validation_idx for the candle where the level becomes valid, and end_idx for the candle that breaches or invalidates the level. Leave end_idx null when no breach occurs before session end.",
         "price_action_levels.context_window": "Micro-level-only immediate relevance window. Use this to mark the short context where a micro support or micro resistance level matters for immediate price action, instead of treating it like a durable macro level.",
         "price_action_levels.context_window.expires_after_bars": "Number of bars after validation where the micro level remains contextually relevant. Default placeholder is 3 bars.",
         "price_action_levels.reaction_candle_indices": "Ordered candle indexes for meaningful reactions at this level, including the validation reaction when applicable.",
@@ -1116,10 +1135,13 @@ def _field_definitions() -> dict:
         "event_outcome_labels.human_interpretation": "Manual interpretation of the event, including controlled read, confidence, supporting reasons, and counterevidence.",
         "event_outcome_labels.raw_price_outcome": "Autopopulated by populate_raw_price_outcomes.py after manual event labeling. Contains raw lookahead outcome measurements across standard 1, 2, 4, 6, 8, 10, 16, 24, and 48 candle windows in the completed JSON copy.",
         "confluence": "Manual combined events where a pattern, trend change, or sequential micro-level break aligns with a level or auction structure.",
+        "confluence.classifications": "Controlled confluence labels. Use one or more classifications when the same candle or range carries multiple valid confluence types.",
         "confluence.primary_structure": "Primary macro support or macro resistance structure involved in the confluence, including the reaction candle that came before the confirming signal.",
         "confluence.confirming_micro_break": "Optional sequential confluence where price rejects from macro resistance then breaches nearby micro support, or bounces from macro support then breaches nearby micro resistance.",
         "confluence.confirming_micro_break.distance_to_primary_level_pct": "Percent distance between the confirming micro level and the primary macro support or macro resistance level.",
         "confluence.confirming_micro_break.occurred_after_primary_reaction": "Boolean marker confirming the micro break occurred after the primary macro support/resistance reaction.",
+        "confluence.coincident_micro_break": "Optional same-event micro support or micro resistance breach that occurs with a primary macro support or macro resistance breach. Leave fields null and same_candle_as_primary_breach false when not applicable.",
+        "confluence.coincident_micro_break.distance_to_primary_level_pct": "Percent distance between the coincident breached micro level and the primary macro support or macro resistance level.",
         "confluence.supports_direction": "Directional implication supported by the confluence.",
         "confluence.conviction_impact": "Whether this confluence increases, decreases, or does not materially change conviction in the referenced level or event.",
         "setup_tags": "Optional controlled setup tags for retrieval or AI filtering; empty list means no setup tags assigned.",
