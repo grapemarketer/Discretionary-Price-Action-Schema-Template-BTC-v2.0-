@@ -8,8 +8,8 @@ The generator creates a fixed 24-hour manual labeling template from Binance 15-m
 
 | File | Purpose |
 |---|---|
-| `v2.1_jsonschema.py` | Current generator for the 24-hour price-action labeling JSON template. |
-| `v2.0_jsonschema.py` | Older generator retained in the workspace. Prefer `v2.1_jsonschema.py` for new files. |
+| `v2.2_jsonschema.py` | Current generator for the 24-hour price-action labeling JSON template. Emits `schema_release: "v2.2"` and `schema_version: 21`. |
+| `v2.1_jsonschema.py` / `v2.0_jsonschema.py` | Older generators retained in prior workspace history. Prefer `v2.2_jsonschema.py` for new files. |
 | `populate_raw_price_outcomes.py` | Reads a manually labeled JSON file and fills `event_outcome_labels.raw_price_outcome`. |
 | `ctx_BTCUSDT_*.json` | Generated labeling templates or completed labeling files. |
 
@@ -33,7 +33,7 @@ The helper script uses only the Python standard library.
 
 The workflow has two stages:
 
-1. Generate the 24-hour manual labeling file with `v2.1_jsonschema.py`.
+1. Generate the 24-hour manual labeling file with `v2.2_jsonschema.py`.
 2. After manually labeling events, run `populate_raw_price_outcomes.py` to produce a completed JSON file with measured outcomes.
 
 The main labeling session always remains 24 hours, from 5PM to 5PM in either EST or EDT.
@@ -45,13 +45,13 @@ The helper may fetch additional candles after the session ends, but only for out
 Run the generator with a session date and timezone:
 
 ```bash
-python v2.1_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json
+python v2.2_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json
 ```
 
 To skip the interactive chart:
 
 ```bash
-python v2.1_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
+python v2.2_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
 ```
 
 If `--output` is omitted, the script creates a timestamped file:
@@ -63,9 +63,9 @@ ctx_BTCUSDT_YYYYMMDD_HHMMSS.json
 Accepted date examples:
 
 ```bash
-python v2.1_jsonschema.py "1/20/26 (EST)"
-python v2.1_jsonschema.py "1/20/26 EDT"
-python v2.1_jsonschema.py "1/20/2026 EST"
+python v2.2_jsonschema.py "1/20/26 (EST)"
+python v2.2_jsonschema.py "1/20/26 EDT"
+python v2.2_jsonschema.py "1/20/2026 EST"
 ```
 
 Only `EST` and `EDT` are supported.
@@ -100,6 +100,37 @@ The output JSON includes:
 - `event_outcome_labels`
 
 The `candles` section is the manual labeling window. It should remain the 24-hour session only.
+
+## Schema Identity And Evidence Boundary
+
+`v2.2_jsonschema.py` emits:
+
+- `schema_name: "PriceActionOnlySession15m"`
+- `schema_release: "v2.2"`
+- `schema_version: 21`
+- `instrument_metadata.market_type: "perpetual_futures"`
+- `schema_metadata.raw_price_outcome_workflow.helper_script: "populate_raw_price_outcomes.py"`
+
+The schema is intentionally OHLC-only. The generator includes OHLC, manual price-action labels, and auto-derived OHLC relationships. It excludes volume, volume delta, CVD, VWAP, open interest, funding, order flow, technical indicators, and cross-session context.
+
+## Objective Generated Fields
+
+Each candle contains:
+
+- `idx`
+- `t`
+- `o`
+- `h`
+- `l`
+- `c`
+- `candlestick.body_size`
+- `relative_to_previous_candle` for candles after `idx: 0`
+
+`relative_to_previous_candle` records high, low, close, and open relationships against the prior candle and flags higher-high/higher-low, lower-high/lower-low, inside-candle, and outside-candle states.
+
+`auto_price_action_sequences` is generated from consecutive higher-high/higher-low or lower-high/lower-low candle relationships. Only runs of at least four candles are emitted.
+
+`last_24h_percent_range` records the session high, low, point range, and percent range based on the generated 5PM-to-5PM candle set.
 
 ## Manual Labeling Sections
 
@@ -372,7 +403,7 @@ Each window contains:
   "max_adverse_close_excursion_pct": 0.321,
   "final_close_return_pct": 0.7425,
   "closed_in_expected_direction": true,
-  "continuation_threshold_pct": 0.25,
+  "continuation_threshold_pct": 0.2,
   "continuation_occurred": true,
   "favorable_threshold_hit": true,
   "first_favorable_threshold_hit_idx": 47,
@@ -410,7 +441,7 @@ For short events:
 
 The event candle close is recorded as `anchor_price` with `anchor_price_source: "event_candle_close"`. This is a standardized measurement anchor, not necessarily a trade entry.
 
-`continuation_occurred` is true only when max favorable wick excursion reaches `continuation_threshold_pct`. The current threshold is `0.25` percent. This avoids treating tiny favorable noise as a continuation.
+`continuation_occurred` is true only when max favorable wick excursion reaches `continuation_threshold_pct`. The current threshold is `0.2` percent. This avoids treating tiny favorable noise as a continuation.
 
 The helper also records favorable threshold timing for:
 
@@ -485,7 +516,7 @@ The helper also writes:
 ```json
 "raw_price_outcome_population": {
   "standard_windows_bars": [1, 2, 4, 6, 8, 10, 16, 24, 48],
-  "continuation_threshold_pct": 0.25,
+  "continuation_threshold_pct": 0.2,
   "favorable_thresholds_pct": [0.15, 0.25, 0.35, 0.5, 0.65, 0.75, 0.85, 1.0, 1.5, 2.0],
   "manual_labeling_candles_unchanged": true,
   "extra_lookahead_candles_fetched": 0,
@@ -511,7 +542,7 @@ Raw outcome fields should be regenerated by `populate_raw_price_outcomes.py` aft
 Generate the manual labeling template:
 
 ```bash
-python v2.1_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
+python v2.2_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
 ```
 
 Manually fill relevant fields in:
