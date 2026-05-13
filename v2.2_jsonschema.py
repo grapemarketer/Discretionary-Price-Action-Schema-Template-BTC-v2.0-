@@ -8,9 +8,9 @@ template, and renders a simple candlestick chart.
 
 Usage
 -----
-  python v2.2_jsonschema.py "1/20/26 (EST)"
-  python v2.2_jsonschema.py "1/20/26 EDT" --symbol ETHUSDT
-  python v2.2_jsonschema.py "1/20/26 (EST)" --output ctx.json --no-chart
+  python v2.0_jsonschema.py "1/20/26 (EST)"
+  python v2.0_jsonschema.py "1/20/26 EDT" --symbol ETHUSDT
+  python v2.0_jsonschema.py "1/20/26 (EST)" --output ctx.json --no-chart
 
 Dependencies
 ------------
@@ -173,13 +173,24 @@ def _empty_level_formation() -> dict:
     }
 
 
+def _empty_reaction_candles(role: str | None = None) -> dict:
+    reaction_candles = {"indices": []}
+    if role is not None and role.endswith("_support"):
+        reaction_candles["lowest_candle_wick_price"] = None
+        reaction_candles["lowest_candle_wick_idx"] = None
+    elif role is not None and role.endswith("_resistance"):
+        reaction_candles["highest_candle_wick_price"] = None
+        reaction_candles["highest_candle_wick_idx"] = None
+    return reaction_candles
+
+
 def _base_level(level_id: str, role: str | None = None) -> dict:
     level = {
         "id": level_id,
         "price": None,
         "formation": _empty_level_formation(),
         "candle_idx_range": _empty_level_candle_range(),
-        "reaction_candle_indices": [],
+        "reaction_candles": _empty_reaction_candles(role),
         "holds_at_session_end": False,
     }
     if role is not None:
@@ -1072,7 +1083,12 @@ def _field_definitions() -> dict:
         "price_action_levels.candle_idx_range": "Level lifecycle for macro and micro support/resistance levels. Use start_idx for the first formation candle, validation_idx for the candle where the level becomes valid, and end_idx for the candle that breaches or invalidates the level. Leave end_idx null when no breach occurs before session end.",
         "price_action_levels.context_window": "Micro-level-only immediate relevance window. Use this to mark the short context where a micro support or micro resistance level matters for immediate price action, instead of treating it like a durable macro level.",
         "price_action_levels.context_window.expires_after_bars": "Number of bars after validation where the micro level remains contextually relevant. Default placeholder is 3 bars.",
-        "price_action_levels.reaction_candle_indices": "Ordered candle indexes for meaningful reactions at this level, including the validation reaction when applicable.",
+        "price_action_levels.reaction_candles": "Reaction candle evidence for a manual macro or micro support/resistance level, including the ordered candle indexes and the wick extreme calculated only from those candles.",
+        "price_action_levels.reaction_candles.indices": "Ordered candle indexes for meaningful reactions at this level, including the validation reaction when applicable.",
+        "price_action_levels.reaction_candles.lowest_candle_wick_price": "For macro support and micro support levels, the lowest low/wick price among only the candles listed in reaction_candles.indices.",
+        "price_action_levels.reaction_candles.lowest_candle_wick_idx": "For macro support and micro support levels, the candle index from reaction_candles.indices that contains lowest_candle_wick_price.",
+        "price_action_levels.reaction_candles.highest_candle_wick_price": "For macro resistance and micro resistance levels, the highest high/wick price among only the candles listed in reaction_candles.indices.",
+        "price_action_levels.reaction_candles.highest_candle_wick_idx": "For macro resistance and micro resistance levels, the candle index from reaction_candles.indices that contains highest_candle_wick_price.",
         "price_action_levels.holds_at_session_end": "Boolean marker for whether the level remains valid through the final candle of the session.",
         "price_action_levels.label_confidence": "Controlled confidence label for manually identified macro support, macro resistance, micro support, and micro resistance levels.",
         "price_action_levels.confidence_reason_codes": "Controlled reasons supporting the validity of a manually identified macro support, macro resistance, micro support, or micro resistance level.",
