@@ -156,7 +156,63 @@ These are stored under:
 
 Macro levels represent durable session structures. Micro levels represent immediate local structures and include a short `context_window` with an `expires_after_bars` placeholder.
 
-Each level includes formation, candle range, reaction indexes, confidence fields, weakness fields, and a `holds_at_session_end` flag. Macro support/resistance levels also include conversion fields for later auction-bound conversion.
+Each level includes formation, candle range, reaction candle evidence, confidence fields, weakness fields, and a `holds_at_session_end` flag. Macro support/resistance levels also include conversion fields for later auction-bound conversion.
+
+`reaction_candles` groups the meaningful reaction candles used for the level and the wick extreme derived only from those candles. For support levels, use `lowest_candle_wick_price` and `lowest_candle_wick_idx`. For resistance levels, use `highest_candle_wick_price` and `highest_candle_wick_idx`. The `*_wick_idx` value must be one of the indexes listed in `reaction_candles.indices`.
+
+Support example:
+
+```json
+{
+  "id": "macro_support_1",
+  "price": 80818.8,
+  "formation": {
+    "first_reaction_idx": 6,
+    "second_reaction_idx": 10,
+    "validation_reaction_idx": 15,
+    "validation_rule": "third_significant_reaction"
+  },
+  "candle_idx_range": {
+    "start_idx": 6,
+    "validation_idx": 15,
+    "end_idx": null
+  },
+  "reaction_candles": {
+    "indices": [6, 9, 10, 15],
+    "lowest_candle_wick_price": 80775.2,
+    "lowest_candle_wick_idx": 9
+  },
+  "holds_at_session_end": true,
+  "level_role": "macro_support"
+}
+```
+
+Resistance example:
+
+```json
+{
+  "id": "macro_resistance_1",
+  "price": 81620.7,
+  "formation": {
+    "first_reaction_idx": 0,
+    "second_reaction_idx": 1,
+    "validation_reaction_idx": 25,
+    "validation_rule": "third_significant_reaction"
+  },
+  "candle_idx_range": {
+    "start_idx": 0,
+    "validation_idx": 25,
+    "end_idx": 46
+  },
+  "reaction_candles": {
+    "indices": [0, 1, 25, 26],
+    "highest_candle_wick_price": 81684.4,
+    "highest_candle_wick_idx": 1
+  },
+  "holds_at_session_end": false,
+  "level_role": "macro_resistance"
+}
+```
 
 ### Negative And Borderline Examples
 
