@@ -8,9 +8,9 @@ template, and renders a simple candlestick chart.
 
 Usage
 -----
-  python v2.0_jsonschema.py "1/20/26 (EST)"
-  python v2.0_jsonschema.py "1/20/26 EDT" --symbol ETHUSDT
-  python v2.0_jsonschema.py "1/20/26 (EST)" --output ctx.json --no-chart
+  python v2.3_jsonschema.py "1/20/26 (EST)"
+  python v2.3_jsonschema.py "1/20/26 EDT" --symbol ETHUSDT
+  python v2.3_jsonschema.py "1/20/26 (EST)" --output ctx.json --no-chart
 
 Dependencies
 ------------
@@ -38,8 +38,8 @@ DEFAULT_SYMBOL = "BTCUSDT"
 SESSION_START_HOUR = 17
 SESSION_END_HOUR = 17
 SCHEMA_NAME = "PriceActionOnlySession15m"
-SCHEMA_VERSION = 21
-SCHEMA_RELEASE = "v2.2"
+SCHEMA_VERSION = 23
+SCHEMA_RELEASE = "v2.3"
 RAW_PRICE_OUTCOME_WINDOWS = (1, 2, 4, 6, 8, 10, 16, 24, 48)
 
 TZ_OFFSETS: dict[str, int] = {"EST": -5, "EDT": -4}
@@ -270,11 +270,11 @@ def _empty_macro_support_resistance_negative_example(example_id: str) -> dict:
         },
         "reaction_sequence": [
             {
-                "reaction_number": None,
-                "candle_idx": None,
-                "reaction_type": None,
-                "reaction_quality": None,
-                "price_respected": None,
+                "reaction_numbers": [],
+                "candle_indices": [],
+                "reaction_types": [],
+                "reaction_qualities": [],
+                "price_respected_flags": [],
             }
         ],
         "duplicate_of_existing_level": {
@@ -306,32 +306,6 @@ def _empty_micro_support_resistance_negative_example(example_id: str) -> dict:
     }
 
 
-def _empty_macro_auction_range_negative_example(example_id: str) -> dict:
-    return {
-        "id": example_id,
-        "candidate_type": "macro",
-        "low": None,
-        "high": None,
-        "candles_within": [_empty_candle_range()],
-        "rejected_as_valid_auction_range": True,
-        "failed_validation_tests": [],
-        "rejection_reason_codes": [],
-    }
-
-
-def _empty_micro_auction_range_negative_example(example_id: str) -> dict:
-    return {
-        "id": example_id,
-        "candidate_type": "micro",
-        "low": None,
-        "high": None,
-        "candle_idx_range": _empty_candle_range(),
-        "rejected_as_valid_auction_range": True,
-        "failed_validation_tests": [],
-        "rejection_reason_codes": [],
-    }
-
-
 def _empty_macro_auction_range(auction_id: str) -> dict:
     return {
         "id": auction_id,
@@ -359,9 +333,6 @@ def _empty_raw_price_outcome_window() -> dict:
         "lookahead_end_idx": None,
         "max_favorable_excursion_pct": None,
         "max_adverse_excursion_pct": None,
-        "continuation_occurred": False,
-        "invalidation_occurred": False,
-        "structure_reclaimed": False,
         "bars_until_max_favorable": None,
         "bars_until_max_adverse": None,
     }
@@ -391,11 +362,11 @@ def _empty_macro_support_resistance_borderline_example(example_id: str) -> dict:
         },
         "reaction_sequence": [
             {
-                "reaction_number": None,
-                "candle_idx": None,
-                "reaction_type": None,
-                "reaction_quality": None,
-                "price_respected": None,
+                "reaction_numbers": [],
+                "candle_indices": [],
+                "reaction_types": [],
+                "reaction_qualities": [],
+                "price_respected_flags": [],
             }
         ],
         "supporting_reason_codes": [],
@@ -418,11 +389,11 @@ def _empty_micro_support_resistance_borderline_example(example_id: str) -> dict:
         },
         "reaction_sequence": [
             {
-                "reaction_number": None,
-                "candle_idx": None,
-                "reaction_type": None,
-                "reaction_quality": None,
-                "price_respected": None,
+                "reaction_numbers": [],
+                "candle_indices": [],
+                "reaction_types": [],
+                "reaction_qualities": [],
+                "price_respected_flags": [],
             }
         ],
         "supporting_reason_codes": [],
@@ -477,6 +448,11 @@ def _empty_confluence(confluence_id: str) -> dict:
             "structure_id": None,
             "structure_role": None,
             "reaction_candle_idx": None,
+        },
+        "secondary_structure": {
+            "micro_trend_id": None,
+            "trend": None,
+            "reaction_candle_indices": [],
         },
         "confirming_micro_break": {
             "micro_level_id": None,
@@ -847,6 +823,9 @@ def _allowed_values() -> dict:
             "formed_inside_chop",
             "too_close_to_stronger_level",
             "no_clear_defensive_response",
+            "opposing_microtrend_break_during_formation",
+            "macro_resistance_shares_candle_reactions",
+            "macro_support_shares_candle_reactions",
         ],
         "macro_support_resistance_borderline_examples.candidate_role": ["macro_support", "macro_resistance"],
         "macro_support_resistance_borderline_examples.candidate_formation.validation_status": ["borderline"],
@@ -892,6 +871,10 @@ def _allowed_values() -> dict:
             "reactions_present_but_weak",
             "level_inside_larger_auction",
             "unclear_defensive_response",
+            "macro_resistance_shares_candle_reactions",
+            "macro_support_shares_candle_reactions",
+            "macro_resistance_close_proximity",
+            "macro_support_close_proximity",
         ],
         "micro_support_resistance_borderline_examples.reaction_sequence.reaction_type": [
             "initial_reaction",
@@ -917,6 +900,10 @@ def _allowed_values() -> dict:
             "third_reaction_not_clean",
             "no_clean_impulse_from_level",
             "inside_larger_auction",
+            "macro_resistance_shares_candle_reactions",
+            "macro_support_shares_candle_reactions",
+            "macro_resistance_close_proximity",
+            "macro_support_close_proximity",
         ],
         "auction_ranges.type": ["macro", "micro"],
         "auction_ranges.validated_by_levels.validation_rule": [
@@ -931,22 +918,6 @@ def _allowed_values() -> dict:
         "auction_ranges.validated_by_levels.upper_bound.bound_role": ["upper_bound"],
         "auction_ranges.validated_by_levels.lower_bound.level_role": ["macro_support"],
         "auction_ranges.validated_by_levels.upper_bound.level_role": ["macro_resistance"],
-        "auction_ranges_negative_examples.candidate_type": ["macro", "micro"],
-        "auction_ranges_negative_examples.failed_validation_tests": [
-            "insufficient_rotations",
-            "range_too_narrow",
-            "range_too_wide",
-            "no_clear_upper_and_lower_bounds",
-            "price_accepted_outside_candidate_range",
-            "candidate_range_overlaps_stronger_auction",
-        ],
-        "auction_ranges_negative_examples.rejection_reason_codes": [
-            "single_rotation_only",
-            "unclear_range_boundaries",
-            "formed_inside_directional_impulse",
-            "too_close_to_stronger_auction",
-            "immediate_range_failure",
-        ],
         "event_outcome_labels.event_type": [
             "macro_support_level_breach",
             "macro_resistance_level_breach",
@@ -1036,10 +1007,16 @@ def _allowed_values() -> dict:
             "macro_support_bounce_with_nearby_micro_resistance_breach",
             "micro_support_breach_and_macro_support_breach",
             "micro_resistance_breach_and_macro_resistance_breach",
+            "topside_macro_resistance_bounce",
+            "underside_macro_support_rejection",
         ],
         "confluence.primary_structure.structure_role": [
             "macro_support",
             "macro_resistance",
+        ],
+        "confluence.secondary_structure.trend": [
+            "micro_buyside",
+            "micro_sellside",
         ],
         "confluence.confirming_micro_break.micro_level_role": [
             "micro_support",
@@ -1097,7 +1074,7 @@ def _field_definitions() -> dict:
         "price_action_levels.level_converted_to_*": "Structured flag for whether a macro support level later became a lower auction bound or a macro resistance level later became an upper auction bound, with the candle index and auction id if applicable.",
         "macro_support_resistance_negative_examples": "Standalone manual negative examples for candidate macro support or macro resistance levels that should not be labeled as valid levels.",
         "macro_support_resistance_negative_examples.candidate_formation": "Formation metadata for a rejected candidate macro support or macro resistance level, including origin, detection candle, required reaction count, actual significant reactions, and validation status.",
-        "macro_support_resistance_negative_examples.reaction_sequence": "Ordered attempted reactions for a rejected candidate level. Add as many reaction objects as needed to show why validation failed.",
+        "macro_support_resistance_negative_examples.reaction_sequence": "Compact ordered attempted reactions for a rejected candidate level. Keep reaction_numbers, candle_indices, reaction_types, reaction_qualities, and price_respected_flags position-aligned so each array index describes the same attempted reaction.",
         "macro_support_resistance_negative_examples.duplicate_of_existing_level": "Context for rejected candidates that duplicate an already viable macro support or macro resistance level, especially when the same candles or weak wick extensions are already explained by the existing level.",
         "macro_support_resistance_negative_examples.failed_validation_tests": "Controlled tests the candidate failed before being rejected as a valid macro support or macro resistance level.",
         "micro_support_resistance_negative_examples": "Standalone manual negative examples for candidate micro support or micro resistance levels that should not be labeled as valid micro levels.",
@@ -1108,11 +1085,11 @@ def _field_definitions() -> dict:
         "macro_support_resistance_negative_examples.invalidated_by_price": "Structured invalidation evidence for a rejected candidate level, including the candle index and invalidation type when price invalidated it.",
         "micro_support_resistance_negative_examples.rejection_reason_codes": "Controlled reasons describing why the candidate micro support or micro resistance example was rejected as a valid micro level.",
         "macro_support_resistance_borderline_examples.candidate_formation": "Formation metadata for an ambiguous macro support or macro resistance candidate, including origin, detection candle, reaction count, validation status, and the primary borderline reason.",
-        "macro_support_resistance_borderline_examples.reaction_sequence": "Ordered reactions used to assess a borderline candidate level. Add as many reaction objects as needed.",
+        "macro_support_resistance_borderline_examples.reaction_sequence": "Compact ordered reactions used to assess a borderline candidate level. Keep reaction_numbers, candle_indices, reaction_types, reaction_qualities, and price_respected_flags position-aligned so each array index describes the same reaction.",
         "macro_support_resistance_borderline_examples.supporting_reason_codes": "Controlled reasons supporting a borderline candidate macro support or macro resistance level.",
         "macro_support_resistance_borderline_examples.weakness_reason_codes": "Controlled reasons describing weaknesses in a borderline candidate macro support or macro resistance level.",
         "micro_support_resistance_borderline_examples.candidate_formation": "Formation metadata for an ambiguous micro support or micro resistance candidate, including origin, detection candle, reaction count, validation status, and the primary borderline reason.",
-        "micro_support_resistance_borderline_examples.reaction_sequence": "Ordered reactions used to assess a borderline micro candidate level. Add as many reaction objects as needed.",
+        "micro_support_resistance_borderline_examples.reaction_sequence": "Compact ordered reactions used to assess a borderline micro candidate level. Keep reaction_numbers, candle_indices, reaction_types, reaction_qualities, and price_respected_flags position-aligned so each array index describes the same reaction.",
         "micro_support_resistance_borderline_examples.supporting_reason_codes": "Controlled reasons supporting a borderline candidate micro support or micro resistance level.",
         "micro_support_resistance_borderline_examples.weakness_reason_codes": "Controlled reasons describing weaknesses in a borderline candidate micro support or micro resistance level.",
         "auction_ranges": "Manual macro and micro auction ranges defined by macro support and macro resistance levels. Macro auctions use viable macro support/resistance bounds greater than 0.5% apart; micro auctions use viable macro support/resistance bounds equal to or less than 0.5% apart.",
@@ -1122,9 +1099,6 @@ def _field_definitions() -> dict:
         "auction_ranges.validated_by_levels.macro_support_resistance_distance_pct": "Percent distance between the validating macro support and macro resistance prices. Values greater than 0.5 classify as macro auctions; values equal to or less than 0.5 classify as micro auctions.",
         "auction_ranges.validated_by_levels.distance_classification_rule": "Controlled label for the 0.5% support/resistance distance threshold used to classify the auction as macro or micro.",
         "auction_ranges.validated_by_levels.additional_confirming_level_ids": "Optional extra macro support or macro resistance level IDs that reinforce the auction range but are not the primary lower or upper bound.",
-        "auction_ranges_negative_examples": "Standalone manual negative examples for candidate macro and micro auction ranges that should not be labeled as valid auction ranges.",
-        "auction_ranges_negative_examples.failed_validation_tests": "Controlled tests the candidate auction range failed before being rejected as a valid macro or micro auction range.",
-        "auction_ranges_negative_examples.rejection_reason_codes": "Controlled reasons describing why the candidate macro or micro auction range was rejected as a valid auction range.",
         "micro_level_regime_context": "Manual local-regime summary derived from repeated micro support and micro resistance behavior. Micro supports forming and holding while micro resistances are breached indicates buyside momentum; micro resistances forming and holding while micro supports are breached indicates sellside momentum.",
         "micro_level_regime_context.dominant_pressure": "Controlled directional pressure inferred from held-vs-breached micro support and micro resistance patterns.",
         "micro_level_regime_context.regime_read": "Controlled explanation of the micro-level pattern that supports the dominant pressure label.",
@@ -1153,6 +1127,7 @@ def _field_definitions() -> dict:
         "confluence": "Manual combined events where a pattern, trend change, or sequential micro-level break aligns with a level or auction structure.",
         "confluence.classifications": "Controlled confluence labels. Use one or more classifications when the same candle or range carries multiple valid confluence types.",
         "confluence.primary_structure": "Primary macro support or macro resistance structure involved in the confluence, including the reaction candle that came before the confirming signal.",
+        "confluence.secondary_structure": "Optional micro trend structure involved in the confluence, including the micro trend id, trend direction, and reaction candle indexes associated with the confluence.",
         "confluence.confirming_micro_break": "Optional sequential confluence where price rejects from macro resistance then breaches nearby micro support, or bounces from macro support then breaches nearby micro resistance.",
         "confluence.confirming_micro_break.distance_to_primary_level_pct": "Percent distance between the confirming micro level and the primary macro support or macro resistance level.",
         "confluence.confirming_micro_break.occurred_after_primary_reaction": "Boolean marker confirming the micro break occurred after the primary macro support/resistance reaction.",
@@ -1245,7 +1220,6 @@ def build_json(
             "section_keys": [
                 "price_action_levels",
                 "auction_ranges",
-                "auction_ranges_negative_examples",
                 "micro_level_regime_context",
                 "micro_trends",
                 "micro_candlestick_patterns",
@@ -1288,10 +1262,6 @@ def build_json(
         "auction_ranges": {
             "macro": [_empty_macro_auction_range(f"macro_auction_{i}") for i in range(1, 4)],
             "micro": [_empty_micro_auction_range(f"micro_auction_{i}") for i in range(1, 4)],
-        },
-        "auction_ranges_negative_examples": {
-            "macro": [_empty_macro_auction_range_negative_example("macro_auction_negative_1")],
-            "micro": [_empty_micro_auction_range_negative_example("micro_auction_negative_1")],
         },
         "micro_level_regime_context": [
             _empty_micro_level_regime_context(f"micro_level_regime_{i}") for i in range(1, 4)
