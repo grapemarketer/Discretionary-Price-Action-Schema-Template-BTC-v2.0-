@@ -8,8 +8,8 @@ The generator creates a fixed 24-hour manual labeling template from Binance 15-m
 
 | File | Purpose |
 |---|---|
-| `v2.2_jsonschema.py` | Current generator for the 24-hour price-action labeling JSON template. Emits `schema_release: "v2.2"` and `schema_version: 21`. |
-| `v2.1_jsonschema.py` / `v2.0_jsonschema.py` | Older generators retained in prior workspace history. Prefer `v2.2_jsonschema.py` for new files. |
+| `v2.3_jsonschema.py` | Current generator for the 24-hour price-action labeling JSON template. Emits `schema_release: "v2.3"` and `schema_version: 23`. |
+| `v2.2_jsonschema.py` / `v2.1_jsonschema.py` / `v2.0_jsonschema.py` | Older generators retained in prior workspace history. Prefer `v2.3_jsonschema.py` for new files. |
 | `populate_raw_price_outcomes.py` | Reads a manually labeled JSON file and fills `event_outcome_labels.raw_price_outcome`. |
 | `ctx_BTCUSDT_*.json` | Generated labeling templates or completed labeling files. |
 
@@ -33,7 +33,7 @@ The helper script uses only the Python standard library.
 
 The workflow has two stages:
 
-1. Generate the 24-hour manual labeling file with `v2.2_jsonschema.py`.
+1. Generate the 24-hour manual labeling file with `v2.3_jsonschema.py`.
 2. After manually labeling events, run `populate_raw_price_outcomes.py` to produce a completed JSON file with measured outcomes.
 
 The main labeling session always remains 24 hours, from 5PM to 5PM in either EST or EDT.
@@ -45,13 +45,13 @@ The helper may fetch additional candles after the session ends, but only for out
 Run the generator with a session date and timezone:
 
 ```bash
-python v2.2_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json
+python v2.3_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json
 ```
 
 To skip the interactive chart:
 
 ```bash
-python v2.2_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
+python v2.3_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
 ```
 
 If `--output` is omitted, the script creates a timestamped file:
@@ -63,9 +63,9 @@ ctx_BTCUSDT_YYYYMMDD_HHMMSS.json
 Accepted date examples:
 
 ```bash
-python v2.2_jsonschema.py "1/20/26 (EST)"
-python v2.2_jsonschema.py "1/20/26 EDT"
-python v2.2_jsonschema.py "1/20/2026 EST"
+python v2.3_jsonschema.py "1/20/26 (EST)"
+python v2.3_jsonschema.py "1/20/26 EDT"
+python v2.3_jsonschema.py "1/20/2026 EST"
 ```
 
 Only `EST` and `EDT` are supported.
@@ -92,7 +92,6 @@ The output JSON includes:
 - `macro_support_resistance_borderline_examples`
 - `micro_support_resistance_borderline_examples`
 - `auction_ranges`
-- `auction_ranges_negative_examples`
 - `micro_level_regime_context`
 - `micro_trends`
 - `micro_candlestick_patterns`
@@ -103,11 +102,11 @@ The `candles` section is the manual labeling window. It should remain the 24-hou
 
 ## Schema Identity And Evidence Boundary
 
-`v2.2_jsonschema.py` emits:
+`v2.3_jsonschema.py` emits:
 
 - `schema_name: "PriceActionOnlySession15m"`
-- `schema_release: "v2.2"`
-- `schema_version: 21`
+- `schema_release: "v2.3"`
+- `schema_version: 23`
 - `instrument_metadata.market_type: "perpetual_futures"`
 - `schema_metadata.raw_price_outcome_workflow.helper_script: "populate_raw_price_outcomes.py"`
 
@@ -225,6 +224,24 @@ The schema includes explicit sections for examples that should not be treated as
 
 Use these sections to capture rejected, duplicate, weak, or ambiguous candidates instead of leaving them undocumented. This helps ML ingestion learn what not to classify as a valid level.
 
+Macro negative examples, macro borderline examples, and micro borderline examples use a compact `reaction_sequence` object with position-aligned arrays:
+
+```json
+"reaction_sequence": [
+  {
+    "reaction_numbers": [1, 2, 3],
+    "candle_indices": [3, 4, 5],
+    "reaction_types": ["initial_reaction", "secondary_reaction", "validation_attempt"],
+    "reaction_qualities": ["medium", "weak", "borderline"],
+    "price_respected_flags": [true, true, false]
+  }
+]
+```
+
+Each array index describes the same reaction across all five arrays.
+
+Micro-level negative and borderline examples include reason codes for macro-level overlap or proximity, including shared macro support/resistance reaction candles, close proximity to macro support/resistance, and opposing micro-trend breaks during formation.
+
 ### Auction Ranges
 
 Auction ranges are split into:
@@ -244,14 +261,7 @@ Macro and micro auctions are validated by macro support/resistance bounds:
 - distances greater than `0.5%` classify as macro auctions
 - distances equal to or below `0.5%` classify as micro auctions
 
-Rejected auction candidates belong in:
-
-```json
-"auction_ranges_negative_examples": {
-  "macro": [],
-  "micro": []
-}
-```
+Auction negative and borderline example sections are not emitted in the current v2.3 template.
 
 ### Micro Level Regime Context
 
@@ -319,9 +329,30 @@ Manual pattern entries can also include `candles_involved` when the relevant can
 
 ### Confluence
 
-`confluence` links a pattern, primary macro structure, optional confirming micro break, and directional support.
+`confluence` links a pattern, primary macro structure, optional secondary micro trend structure, optional confirming micro break, and directional support.
 
 Use this section when a candlestick pattern, level reaction, trend change, or micro-level break strengthens the read of a structural event.
+
+`classifications` is an array, so more than one controlled confluence label can be applied to the same entry:
+
+```json
+"classifications": [
+  "topside_macro_resistance_bounce",
+  "pattern_within_trend"
+]
+```
+
+Current classifications include macro/micro pattern-at-structure labels, trend labels, sequential or coincident micro-break labels, `topside_macro_resistance_bounce`, and `underside_macro_support_rejection`.
+
+Use `secondary_structure` when the confluence also references a micro trend:
+
+```json
+"secondary_structure": {
+  "micro_trend_id": "micro_trend_1",
+  "trend": "micro_buyside",
+  "reaction_candle_indices": [42, 43]
+}
+```
 
 ### Event Outcome Labels
 
@@ -460,12 +491,9 @@ Each window contains:
   "final_close_return_pct": 0.7425,
   "closed_in_expected_direction": true,
   "continuation_threshold_pct": 0.2,
-  "continuation_occurred": true,
   "favorable_threshold_hit": true,
   "first_favorable_threshold_hit_idx": 47,
   "bars_until_favorable_threshold": 5,
-  "invalidation_occurred": false,
-  "structure_reclaimed": false,
   "invalidation_rule": "m15_close_back_above_structure_price",
   "adverse_before_max_favorable": false,
   "threshold_hits": {
@@ -497,8 +525,6 @@ For short events:
 
 The event candle close is recorded as `anchor_price` with `anchor_price_source: "event_candle_close"`. This is a standardized measurement anchor, not necessarily a trade entry.
 
-`continuation_occurred` is true only when max favorable wick excursion reaches `continuation_threshold_pct`. The current threshold is `0.2` percent. This avoids treating tiny favorable noise as a continuation.
-
 The helper also records favorable threshold timing for:
 
 ```json
@@ -516,7 +542,7 @@ Close-based outcomes are included separately from wick-based MFE/MAE:
 
 This preserves the difference between a wick excursion and accepted candle closes.
 
-If `referenced_structure.structure_price` is provided, the helper checks whether the structure was reclaimed or invalidated during the lookahead window. The rule used is stored in `invalidation_rule`. The rule is event-type aware where possible:
+If `referenced_structure.structure_price` is provided, the helper records the event-type-aware `invalidation_rule` used for structure checks:
 
 - support breach: close back above structure price
 - resistance breach: close back below structure price
@@ -525,7 +551,7 @@ If `referenced_structure.structure_price` is provided, the helper checks whether
 - upper auction-bound breach or sweep: close back below structure price
 - lower auction-bound breach or sweep: close back above structure price
 
-If the event type is missing or not recognized, the helper falls back to direction-based invalidation.
+If the event type is missing or not recognized, the helper falls back to a direction-based rule.
 
 `adverse_before_max_favorable` indicates whether the max adverse wick occurred before the max favorable wick. This helps distinguish clean continuation from setups that first punished early entries.
 
@@ -598,7 +624,7 @@ Raw outcome fields should be regenerated by `populate_raw_price_outcomes.py` aft
 Generate the manual labeling template:
 
 ```bash
-python v2.2_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
+python v2.3_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
 ```
 
 Manually fill relevant fields in:
@@ -609,7 +635,6 @@ Manually fill relevant fields in:
 - `macro_support_resistance_borderline_examples`
 - `micro_support_resistance_borderline_examples`
 - `auction_ranges`
-- `auction_ranges_negative_examples`
 - `micro_level_regime_context`
 - `micro_trends`
 - `micro_candlestick_patterns`
