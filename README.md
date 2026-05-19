@@ -8,8 +8,8 @@ The generator creates a fixed 24-hour manual labeling template from Binance 15-m
 
 | File | Purpose |
 |---|---|
-| `v2.3_jsonschema.py` | Current generator for the 24-hour price-action labeling JSON template. Emits `schema_release: "v2.3"` and `schema_version: 23`. |
-| `v2.2_jsonschema.py` / `v2.1_jsonschema.py` / `v2.0_jsonschema.py` | Older generators retained in prior workspace history. Prefer `v2.3_jsonschema.py` for new files. |
+| `v2.4_jsonschema.py` | Current generator for the 24-hour price-action labeling JSON template. Emits `schema_release: "v2.4"` and `schema_version: 24`. |
+| `v2.3_jsonschema.py` / `v2.2_jsonschema.py` / `v2.1_jsonschema.py` / `v2.0_jsonschema.py` | Older generators retained in prior workspace history. Prefer `v2.4_jsonschema.py` for new files. |
 | `populate_raw_price_outcomes.py` | Reads a manually labeled JSON file and fills `event_outcome_labels.raw_price_outcome`. |
 | `ctx_BTCUSDT_*.json` | Generated labeling templates or completed labeling files. |
 
@@ -33,7 +33,7 @@ The helper script uses only the Python standard library.
 
 The workflow has two stages:
 
-1. Generate the 24-hour manual labeling file with `v2.3_jsonschema.py`.
+1. Generate the 24-hour manual labeling file with `v2.4_jsonschema.py`.
 2. After manually labeling events, run `populate_raw_price_outcomes.py` to produce a completed JSON file with measured outcomes.
 
 The main labeling session always remains 24 hours, from 5PM to 5PM in either EST or EDT.
@@ -45,14 +45,16 @@ The helper may fetch additional candles after the session ends, but only for out
 Run the generator with a session date and timezone:
 
 ```bash
-python v2.3_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json
+python v2.4_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json
 ```
 
 To skip the interactive chart:
 
 ```bash
-python v2.3_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
+python v2.4_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
 ```
+
+`--symbol` is not limited to `BTCUSDT`. You can use any valid Binance Futures symbol supported by the klines endpoint, such as `ETHUSDT`, and the generated JSON/output filename will use that symbol.
 
 If `--output` is omitted, the script creates a timestamped file:
 
@@ -63,9 +65,9 @@ ctx_BTCUSDT_YYYYMMDD_HHMMSS.json
 Accepted date examples:
 
 ```bash
-python v2.3_jsonschema.py "1/20/26 (EST)"
-python v2.3_jsonschema.py "1/20/26 EDT"
-python v2.3_jsonschema.py "1/20/2026 EST"
+python v2.4_jsonschema.py "1/20/26 (EST)"
+python v2.4_jsonschema.py "1/20/26 EDT"
+python v2.4_jsonschema.py "1/20/2026 EST"
 ```
 
 Only `EST` and `EDT` are supported.
@@ -102,11 +104,11 @@ The `candles` section is the manual labeling window. It should remain the 24-hou
 
 ## Schema Identity And Evidence Boundary
 
-`v2.3_jsonschema.py` emits:
+`v2.4_jsonschema.py` emits:
 
 - `schema_name: "PriceActionOnlySession15m"`
-- `schema_release: "v2.3"`
-- `schema_version: 23`
+- `schema_release: "v2.4"`
+- `schema_version: 24`
 - `instrument_metadata.market_type: "perpetual_futures"`
 - `schema_metadata.raw_price_outcome_workflow.helper_script: "populate_raw_price_outcomes.py"`
 
@@ -157,6 +159,19 @@ Macro levels represent durable session structures. Micro levels represent immedi
 
 Each level includes formation, candle range, reaction candle evidence, confidence fields, weakness fields, and a `holds_at_session_end` flag. Macro support/resistance levels also include conversion fields for later auction-bound conversion.
 
+`formation.candles_till_formation` records the number of candles from the origin/first reaction candle to the validation reaction candle. For example, if the origin is `idx: 10` and the confirming candle is `idx: 20`, record `10`.
+
+Allowed `formation.validation_rule` values include:
+
+- `third_significant_reaction`
+- `manual_multi_reaction_validation`
+- `past_price_action_structural_evidence`
+
+Micro-level confidence reason codes can include:
+
+- `new_close_high_within_micro_buyside_trend`
+- `new_close_low_within_micro_sellside_trend`
+
 `reaction_candles` groups the meaningful reaction candles used for the level and the wick extreme derived only from those candles. For support levels, use `lowest_candle_wick_price` and `lowest_candle_wick_idx`. For resistance levels, use `highest_candle_wick_price` and `highest_candle_wick_idx`. The `*_wick_idx` value must be one of the indexes listed in `reaction_candles.indices`.
 
 Support example:
@@ -169,6 +184,7 @@ Support example:
     "first_reaction_idx": 6,
     "second_reaction_idx": 10,
     "validation_reaction_idx": 15,
+    "candles_till_formation": 9,
     "validation_rule": "third_significant_reaction"
   },
   "candle_idx_range": {
@@ -196,6 +212,7 @@ Resistance example:
     "first_reaction_idx": 0,
     "second_reaction_idx": 1,
     "validation_reaction_idx": 25,
+    "candles_till_formation": 25,
     "validation_rule": "third_significant_reaction"
   },
   "candle_idx_range": {
@@ -261,7 +278,7 @@ Macro and micro auctions are validated by macro support/resistance bounds:
 - distances greater than `0.5%` classify as macro auctions
 - distances equal to or below `0.5%` classify as micro auctions
 
-Auction negative and borderline example sections are not emitted in the current v2.3 template.
+Auction negative and borderline example sections are not emitted in the current v2.4 template.
 
 ### Micro Level Regime Context
 
@@ -624,7 +641,7 @@ Raw outcome fields should be regenerated by `populate_raw_price_outcomes.py` aft
 Generate the manual labeling template:
 
 ```bash
-python v2.3_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
+python v2.4_jsonschema.py "5/6/26 EDT" --symbol BTCUSDT --output ctx_BTCUSDT_20260506.json --no-chart
 ```
 
 Manually fill relevant fields in:
