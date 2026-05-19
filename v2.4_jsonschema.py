@@ -8,9 +8,9 @@ template, and renders a simple candlestick chart.
 
 Usage
 -----
-  python v2.3_jsonschema.py "1/20/26 (EST)"
-  python v2.3_jsonschema.py "1/20/26 EDT" --symbol ETHUSDT
-  python v2.3_jsonschema.py "1/20/26 (EST)" --output ctx.json --no-chart
+  python v2.4_jsonschema.py "1/20/26 (EST)"
+  python v2.4_jsonschema.py "1/20/26 EDT" --symbol ETHUSDT
+  python v2.4_jsonschema.py "1/20/26 (EST)" --output ctx.json --no-chart
 
 Dependencies
 ------------
@@ -38,8 +38,8 @@ DEFAULT_SYMBOL = "BTCUSDT"
 SESSION_START_HOUR = 17
 SESSION_END_HOUR = 17
 SCHEMA_NAME = "PriceActionOnlySession15m"
-SCHEMA_VERSION = 23
-SCHEMA_RELEASE = "v2.3"
+SCHEMA_VERSION = 24
+SCHEMA_RELEASE = "v2.4"
 RAW_PRICE_OUTCOME_WINDOWS = (1, 2, 4, 6, 8, 10, 16, 24, 48)
 
 TZ_OFFSETS: dict[str, int] = {"EST": -5, "EDT": -4}
@@ -169,6 +169,7 @@ def _empty_level_formation() -> dict:
         "first_reaction_idx": None,
         "second_reaction_idx": None,
         "validation_reaction_idx": None,
+        "candles_till_formation": None,
         "validation_rule": None,
     }
 
@@ -735,6 +736,7 @@ def _allowed_values() -> dict:
         "price_action_levels.formation.validation_rule": [
             "third_significant_reaction",
             "manual_multi_reaction_validation",
+            "past_price_action_structural_evidence",
         ],
         "price_action_levels.label_confidence": ["high", "medium", "low"],
         "price_action_levels.confidence_reason_codes": [
@@ -743,6 +745,8 @@ def _allowed_values() -> dict:
             "decent_reactions",
             "formed_after_buyside_impulse",
             "formed_after_sellside_impulse",
+            "new_close_high_within_micro_buyside_trend",
+            "new_close_low_within_micro_sellside_trend",
             "no_m15_close_below_level",
             "no_m15_close_above_level",
         ],
@@ -1056,6 +1060,7 @@ def _field_definitions() -> dict:
         "last_24h_percent_range": "High-low range for this 24-hour session, expressed in points and percent of the session low.",
         "price_action_levels": "Manual macro support, macro resistance, micro support, and micro resistance levels identified from price action only.",
         "price_action_levels.formation": "Reaction sequence used to validate a manual macro support, macro resistance, micro support, or micro resistance level. Use validation_reaction_idx for the reaction that makes the level valid.",
+        "price_action_levels.formation.candles_till_formation": "Number of candles from the level origin/first reaction candle to the validation reaction candle that confirms the level. Example: if origin is idx 10 and confirmation is idx 20, record 10.",
         "price_action_levels.formation.validation_rule": "Controlled rule describing why the level is considered valid. Use third_significant_reaction when the third meaningful reaction confirms the level.",
         "price_action_levels.candle_idx_range": "Level lifecycle for macro and micro support/resistance levels. Use start_idx for the first formation candle, validation_idx for the candle where the level becomes valid, and end_idx for the candle that breaches or invalidates the level. Leave end_idx null when no breach occurs before session end.",
         "price_action_levels.context_window": "Micro-level-only immediate relevance window. Use this to mark the short context where a micro support or micro resistance level matters for immediate price action, instead of treating it like a durable macro level.",
